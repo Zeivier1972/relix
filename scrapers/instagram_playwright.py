@@ -37,10 +37,10 @@ HASHTAGS = [
 ]
 
 COMMENT_ACCOUNTS = [
-    "miamirealestate",
+    "catherinegomez_realtor",
     "preconstruccionmiami",
     "colombianosenmiami",
-    "miamiagenteinmobiliario",
+    "miamirealestate",
     "luxurymiamirealestate",
 ]
 
@@ -79,7 +79,8 @@ async def _build_context(playwright):
 
 class InstagramPlaywrightScraper:
     """
-    Scrapes buyer-intent posts from Instagram hashtags and comments using Playwright.
+    Scrapes buyer-intent posts from Instagram hashtags and comments for Catherine Gomez P.A.
+    Targets Colombian and Latino buyers searching for pre-construction homes in South Florida.
     Primary: intercepts Instagram's internal JSON API responses.
     Fallback: extracts post links from the hashtag grid DOM.
     """

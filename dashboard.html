@@ -316,20 +316,25 @@ const PLATFORM = {
 };
 
 const SPANISH_DMS = [
-  'Hola! 👋 Vi tu publicación y me gustaría ayudarte a encontrar tu hogar en Miami. Soy Catherine Gomez, especialista en propiedades en South Florida. ¿Cuándo podemos hablar?',
-  'Hola! Soy Catherine Gomez, agente de bienes raíces en Miami. Vi que estás buscando casa — te puedo guiar en todo el proceso sin costo. ¿Tienes un momento?',
-  '¡Hola! Vi tu interés en propiedades en Florida. Soy Catherine Gomez P.A. y me especializo en ayudar a familias latinas a comprar su primera casa en Miami. ¿Te puedo ayudar?',
+  'Hola [name]! Soy Catherine Gomez, agente inmobiliaria en Miami especializada en compradores colombianos y latinos. Vi tu publicación y me gustaría ayudarte con tu búsqueda de casa en Florida. ¿Tienes un momento para hablar?',
+  'Hola [name]! Te escribo porque vi tu publicación sobre propiedades en Florida. Soy Catherine Gomez P.A., especialista en pre-construcción para compradores latinos en Miami. ¿Tienes un momento para que te cuente las opciones disponibles?',
+  'Hola [name], que tal! Vi que estás buscando casa en Florida. Soy Catherine Gomez, agente inmobiliaria en South Florida especializada en ayudar a familias colombianas y latinas a comprar su primer hogar. ¿Cuándo podemos hablar?',
+  'Hola [name]! Soy Catherine Gomez, agente en Miami. Vi tu publicación y trabajo con muchos compradores colombianos y latinos — te puedo guiar en todo el proceso de compra de pre-construcción sin costo. ¿Te interesa?',
+  'Que tal [name]! Vi que buscas propiedad en Florida. Soy Catherine Gomez P.A., especialista en pre-construcción para compradores latinos en South Florida. Con gusto te explico el proceso. ¿Tienes un momento?',
 ];
 const ENGLISH_DMS = [
-  "Hi! I noticed you're looking to buy in Miami. I'm Catherine Gomez, a real estate specialist in South Florida. I'd love to help — when's a good time to chat?",
-  "Hey! Saw your post about buying in Florida. I'm Catherine Gomez, a realtor specializing in South Florida properties. Happy to answer questions — no pressure at all!",
+  "Hi [name]! I'm Catherine Gomez, a real estate agent in South Florida specializing in pre-construction homes for Latino and Colombian buyers. I saw your post and would love to help you find your dream home in Florida. Would you like to chat?",
+  "Hey [name]! I saw your post and wanted to reach out — I'm Catherine Gomez, a real estate specialist in Miami focusing on pre-construction homes for Latin American buyers. Happy to walk you through the process at no cost. Interested?",
+  "Hi [name], hope you're doing well! I'm Catherine Gomez P.A., a South Florida real estate agent specializing in helping Colombian and Latino buyers find pre-construction homes in Miami. Would you like to know more?",
 ];
 const SPANISH_SRC = new Set(['instagram_hashtags','instagram_comments','facebook_groups','tiktok_comments']);
 
 function dm(source, name) {
   const pool = SPANISH_SRC.has(source) ? SPANISH_DMS : ENGLISH_DMS;
   const h = (name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0);
-  return pool[h % pool.length];
+  const firstName = (name||'').split(/[._]/)[0].replace(/[^a-zA-Z]/g,'');
+  const displayName = firstName ? firstName.charAt(0).toUpperCase() + firstName.slice(1) : (SPANISH_SRC.has(source) ? 'amigo' : 'there');
+  return pool[h % pool.length].replace('[name]', displayName);
 }
 
 function ago(ts) {

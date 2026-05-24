@@ -86,7 +86,8 @@ async def _build_context(playwright):
 
 class FacebookPlaywrightScraper:
     """
-    Scrape buyer-intent posts from Facebook groups using Playwright.
+    Scrapes buyer-intent posts from Colombian and Latino Facebook groups for Catherine Gomez P.A.
+    Targets buyers searching for pre-construction homes in South Florida.
     Authenticates via FACEBOOK_C_USER + FACEBOOK_XS session cookies.
     """
 

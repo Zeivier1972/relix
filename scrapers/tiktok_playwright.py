@@ -61,8 +61,9 @@ async def _build_context(playwright):
 
 class TikTokPlaywrightScraper:
     """
-    Search TikTok for Spanish buyer-intent keywords, find the top N videos,
-    then scrape comments on those videos for people showing purchase intent.
+    Searches TikTok for Spanish buyer-intent keywords on behalf of Catherine Gomez P.A.
+    Finds the top N videos per keyword, then scrapes comments for Colombian and Latino
+    buyers showing purchase intent for pre-construction homes in South Florida.
     Uses API response interception as primary method; DOM as fallback.
     No login required — all public content.
     """

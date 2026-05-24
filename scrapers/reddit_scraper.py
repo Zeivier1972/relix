@@ -27,10 +27,10 @@ BUYER_INTENT_KEYWORDS = [
 
 
 class RedditScraper:
-    """Scrape buyer-intent posts and comments from Reddit using the free JSON API."""
+    """Scrape buyer-intent posts from Reddit for Catherine Gomez P.A. — South Florida pre-construction specialist."""
 
     BASE_URL = "https://www.reddit.com"
-    HEADERS = {"User-Agent": "RELIX-LeadBot/1.0 (real estate research)"}
+    HEADERS = {"User-Agent": "CatherineGomezPA-RELIX/1.0 (South Florida real estate)"}
 
     def __init__(self):
         self.client = httpx.AsyncClient(timeout=30.0, headers=self.HEADERS)

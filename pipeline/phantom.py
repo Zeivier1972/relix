@@ -34,55 +34,47 @@ SESSION_FILE = Path("./instagram_session.json")
 # ---------------------------------------------------------------------------
 _DM_ES_VARIANTS = [
     (
-        "Hola {name}! Vi que estas buscando casa en Miami o Florida. "
-        "Soy agente inmobiliaria especializada en ayudar a colombianos a comprar "
-        "su primera propiedad en USA. Te puedo explicar el proceso y opciones de "
-        "financiamiento sin costo. Te interesa?"
+        "Hola {name}! Soy Catherine Gomez, agente inmobiliaria en Miami especializada "
+        "en compradores colombianos y latinos. Vi tu publicación y me gustaría ayudarte "
+        "con tu búsqueda de casa en Florida. ¿Tienes un momento para hablar?"
     ),
     (
-        "Hola {name}, que tal! Vi tu publicacion y queria presentarme — soy Catherine, "
-        "agente inmobiliaria en Miami especializada en compradores colombianos. "
-        "Si estas pensando en comprar casa aqui, con gusto te explico como funciona "
-        "el proceso para extranjeros. Es mas sencillo de lo que parece. Me avisas?"
+        "Hola {name}! Te escribo porque vi tu publicación sobre propiedades en Florida. "
+        "Soy Catherine Gomez P.A., especialista en pre-construcción para compradores "
+        "latinos en Miami. ¿Tienes un momento para que te cuente las opciones disponibles?"
     ),
     (
-        "Hola {name}! Trabajo con muchos colombianos que estan comprando su primera "
-        "casa en Florida y queria ofrecerte mi ayuda. Te explico el proceso completo, "
-        "requisitos y como acceder a financiamiento — todo sin costo. "
-        "Cuando tienes un momento para hablar?"
+        "Hola {name}, que tal! Vi que estás buscando casa en Florida. Soy Catherine Gomez, "
+        "agente inmobiliaria en South Florida especializada en ayudar a familias colombianas "
+        "y latinas a comprar su primer hogar. ¿Cuándo podemos hablar?"
     ),
     (
-        "Hola {name}! Vi que estas interesado en propiedades en Miami/Florida. "
-        "Soy agente inmobiliaria especializada en ayudar a latinos a comprar en USA. "
-        "Puedo guiarte paso a paso desde la pre-aprobacion hasta el cierre. "
-        "Te gustaria saber mas?"
+        "Hola {name}! Soy Catherine Gomez, agente en Miami. Vi tu publicación y trabajo "
+        "con muchos compradores colombianos y latinos — te puedo guiar en todo el proceso "
+        "de compra de pre-construcción sin costo. ¿Te interesa?"
     ),
     (
-        "Que tal {name}! Te escribo porque vi que buscas casa en Florida. "
-        "Ayudo a colombianos a comprar su primera propiedad en USA — me encargo "
-        "de todo el proceso y te explico las opciones de financiamiento disponibles. "
-        "Sin costo y sin compromiso. Te cuento mas?"
+        "Que tal {name}! Vi que buscas propiedad en Florida. Soy Catherine Gomez P.A., "
+        "especialista en pre-construcción para compradores latinos en South Florida. "
+        "Con gusto te explico el proceso. ¿Tienes un momento?"
     ),
 ]
 
 _DM_EN_VARIANTS = [
     (
-        "Hey {name}! I noticed you're looking to buy a home in Miami or Florida. "
-        "I'm a real estate agent specializing in helping Colombian buyers navigate "
-        "the US market. Happy to walk you through the process and financing options "
-        "at no cost. Interested?"
+        "Hi {name}! I'm Catherine Gomez, a real estate agent in South Florida specializing "
+        "in pre-construction homes for Latino and Colombian buyers. I saw your post and would "
+        "love to help you find your dream home in Florida. Would you like to chat?"
     ),
     (
-        "Hi {name}! Saw you're interested in Florida real estate — I work with "
-        "a lot of Colombian buyers looking for their first home in the US. "
-        "I can guide you through the whole process, from pre-approval to closing. "
-        "Would you like to know more?"
+        "Hey {name}! I saw your post and wanted to reach out — I'm Catherine Gomez, a real "
+        "estate specialist in Miami focusing on pre-construction homes for Latin American "
+        "buyers. Happy to walk you through the process at no cost. Interested?"
     ),
     (
-        "Hey {name}, hope you're doing well! I specialize in helping Colombians "
-        "buy property in Miami and Florida. If you're thinking about it, "
-        "I'd love to explain how financing works for foreign buyers — it's more "
-        "accessible than most people think. Want to chat?"
+        "Hi {name}, hope you're doing well! I'm Catherine Gomez P.A., a South Florida real "
+        "estate agent specializing in helping Colombian and Latino buyers find pre-construction "
+        "homes in Miami. Would you like to know more?"
     ),
 ]
 
