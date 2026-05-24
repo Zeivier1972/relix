@@ -2,19 +2,54 @@ import asyncio
 import httpx
 from typing import List, Dict, Any
 
-SUBREDDITS = ["Miami", "orlando", "Colombia", "personalfinance", "realestate"]
+SUBREDDITS = [
+    # ── Florida markets ───────────────────────────────────────────────────
+    "Miami",
+    "orlando",
+    "WestPalmBeach",
+    "Broward",
+
+    # ── Latin American community ──────────────────────────────────────────
+    "Colombia",
+
+    # ── Finance / first-time buyers ───────────────────────────────────────
+    "personalfinance",
+    "FirstTimeHomeBuyer",
+    "realestateinvesting",
+    "realestate",
+
+    # ── Investment & lifestyle ────────────────────────────────────────────
+    "AirBnB",
+    "fatFIRE",
+    "legaladvice",
+]
 
 SEARCH_TERMS = [
+    # ── English buyer intent ──────────────────────────────────────────────
     "buying home Miami",
-    "comprar casa florida",
-    "Colombian investing USA",
-    "pre-construction Miami",
-    "moving to Florida",
     "buy house Miami",
     "first home Florida",
     "real estate Miami",
     "mortgage Florida",
     "down payment Miami",
+    "moving to Florida",
+    "pre-construction Miami",
+    "new construction Florida",
+    "pre-construction condo Miami",
+    "Colombian investing USA",
+    "invest Miami real estate",
+    "relocating to Miami",
+    "relocating to Florida",
+    "airbnb investment Miami",
+    "short term rental Florida",
+
+    # ── Spanish buyer intent ──────────────────────────────────────────────
+    "comprar casa florida",
+    "comprar casa miami",
+    "primera casa florida",
+    "pre construccion miami",
+    "invertir en florida",
+    "colombianos comprando casa usa",
 ]
 
 BUYER_INTENT_KEYWORDS = [

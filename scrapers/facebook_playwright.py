@@ -8,9 +8,64 @@ from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, BrowserContext
 
 FACEBOOK_GROUPS = [
+    # ── Latino / Colombian focused ────────────────────────────────────────
     "https://www.facebook.com/groups/colombianosenflorida",
     "https://www.facebook.com/groups/colombianosenmiami",
     "https://www.facebook.com/groups/colombiansinusa",
+    "https://www.facebook.com/groups/colombianosenorlando",
+    "https://www.facebook.com/groups/colombianosinvertendousa",
+    "https://www.facebook.com/groups/latinosenflorida",
+    "https://www.facebook.com/groups/latinosinmiami",
+    "https://www.facebook.com/groups/hispanosenmiami",
+    "https://www.facebook.com/groups/venezolanosenflorida",
+    "https://www.facebook.com/groups/venezolanosenmiami",
+    "https://www.facebook.com/groups/argentinosenflorida",
+    "https://www.facebook.com/groups/mexicanosenflorida",
+    "https://www.facebook.com/groups/puertorriquenosenflorida",
+
+    # ── South Florida cities ──────────────────────────────────────────────
+    "https://www.facebook.com/groups/miamirealestate",
+    "https://www.facebook.com/groups/miamihomebuyers",
+    "https://www.facebook.com/groups/miamiinvestors",
+    "https://www.facebook.com/groups/homesteadfloridarealstate",
+    "https://www.facebook.com/groups/homesteadfloridahomes",
+    "https://www.facebook.com/groups/brickellmiamirealestate",
+    "https://www.facebook.com/groups/wynwoodhomes",
+    "https://www.facebook.com/groups/miamibeachhomes",
+    "https://www.facebook.com/groups/coralgablesproperties",
+    "https://www.facebook.com/groups/doralfloridarealstate",
+    "https://www.facebook.com/groups/hialeahrealestate",
+    "https://www.facebook.com/groups/kendallfloridarealstate",
+    "https://www.facebook.com/groups/sunriseflrealestate",
+    "https://www.facebook.com/groups/pembrokepiresrealestate",
+    "https://www.facebook.com/groups/fortlauderdalerealestate",
+    "https://www.facebook.com/groups/bocaratonhomes",
+    "https://www.facebook.com/groups/westpalmbeachrealestate",
+    "https://www.facebook.com/groups/wellingtonflhomes",
+    "https://www.facebook.com/groups/orlandorealestate",
+    "https://www.facebook.com/groups/orlandohomebuyers",
+    "https://www.facebook.com/groups/tamparealestate",
+    "https://www.facebook.com/groups/tampahomebuyers",
+
+    # ── Pre-construction specific ─────────────────────────────────────────
+    "https://www.facebook.com/groups/preconstruccionflorida",
+    "https://www.facebook.com/groups/preconstruccionmiami",
+    "https://www.facebook.com/groups/floridanewconstruction",
+    "https://www.facebook.com/groups/miamiNewConstruction",
+    "https://www.facebook.com/groups/preconstruccionusa",
+    "https://www.facebook.com/groups/newhomesflorida",
+    "https://www.facebook.com/groups/nuevascasasenmiami",
+    "https://www.facebook.com/groups/nuevaconstruccionmiami",
+
+    # ── Real estate investing ─────────────────────────────────────────────
+    "https://www.facebook.com/groups/floridainvestors",
+    "https://www.facebook.com/groups/miamiinvestmentproperties",
+    "https://www.facebook.com/groups/southfloridainvestors",
+    "https://www.facebook.com/groups/realestateinvestorsflorida",
+    "https://www.facebook.com/groups/inversionistasflorida",
+    "https://www.facebook.com/groups/inversionistasmiami",
+    "https://www.facebook.com/groups/airbnbmiami",
+    "https://www.facebook.com/groups/shorttermrentalsflorida",
 ]
 
 BUYER_INTENT_KEYWORDS = [

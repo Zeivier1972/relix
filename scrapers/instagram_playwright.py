@@ -22,26 +22,65 @@ BUYER_INTENT_KEYWORDS = [
 ]
 
 HASHTAGS = [
+    # ── Buyer intent ─────────────────────────────────────────────────────
     "quieromprarencasa",
+    "comprarcasaenmiami",
     "buscandocasaenmiami",
     "mudanzaaflorida",
     "colombianosbuscandocasa",
+    "latinosbuscandocasa",
     "comprarcasausa",
     "primeracasaenusa",
     "inversionistascolombianos",
     "vivireenflorida",
     "comprarcasaenflorida",
     "casapropia",
+    "casapropiaflorida",
+    "hogarpropioflorida",
     "colombianosenmiami",
     "colombianosenusa",
+
+    # ── Pre-construction ──────────────────────────────────────────────────
+    "preconstruccionmiami",
+    "preconstruccionflorida",
+    "nuevaconstruccion",
+    "casasnuevasmiami",
+    "newconstructionmiami",
+    "newconstructionflorida",
+    "preconstruccionusa",
+    "preventa",
+
+    # ── South Florida cities ──────────────────────────────────────────────
+    "miamibeachhomes",
+    "brickellmiami",
+    "wynwoodhomes",
+    "homesteadflorida",
+    "coralgables",
+    "doralfl",
+    "hialeahhomes",
+    "kendallfl",
+    "sunrisefl",
+    "fortlauderdalehomes",
+    "bocaratonrealestate",
+    "westpalmbeachhomes",
+    "orlandohomes",
 ]
 
 COMMENT_ACCOUNTS = [
+    # ── Catherine's own account (catch buyers commenting on her posts) ────
     "catherinegomez_realtor",
-    "preconstruccionmiami",
-    "colombianosenmiami",
+
+    # ── Competitor / high-traffic RE accounts ────────────────────────────
+    "oneworldproperties",
+    "onesothebysrealty",
+    "compassflorida",
+    "relatedgroup",
+    "totalbankrealty",
     "miamirealestate",
     "luxurymiamirealestate",
+    "preconstruccionmiami",
+    "brickellrealty",
+    "miamicondoinvestments",
 ]
 
 
