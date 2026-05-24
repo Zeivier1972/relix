@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import asyncio
+import json
 import os
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
@@ -602,6 +603,43 @@ async def push_lead_by_username(contact: dict):
     if result:
         return {"status": "pushed", "lead_id": lead.get("id"), "name": enriched.get("name")}
     return {"status": "skipped", "reason": "webhook not configured"}
+
+
+@app.get("/api/reddit-leads")
+async def get_reddit_leads(limit: int = 100):
+    leads = db.get_hot_reddit_leads(limit=limit)
+    return {"count": len(leads), "leads": leads}
+
+
+@app.post("/api/reddit-leads/{lead_id}/generate-reply")
+async def generate_reddit_reply(lead_id: int):
+    # Return cached reply instantly if already generated
+    cached = db.get_reddit_reply(lead_id)
+    if cached and cached.get("reply_text"):
+        return {"reply": cached["reply_text"], "cached": True}
+
+    lead = db.get_lead(lead_id)
+    if not lead:
+        return {"error": "Lead not found"}
+
+    raw = lead.get("raw_data")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = {}
+    lead["raw_data"] = raw or {}
+
+    reply = await asyncio.to_thread(qualifier.generate_reddit_reply, lead)
+    db.save_reddit_reply(lead_id, reply)
+    return {"reply": reply, "cached": False}
+
+
+@app.post("/api/reddit-leads/{lead_id}/mark-replied")
+async def mark_reddit_replied(lead_id: int, body: dict):
+    replied = bool(body.get("replied", True))
+    db.mark_reddit_replied(lead_id, replied)
+    return {"lead_id": lead_id, "marked_replied": replied}
 
 
 if __name__ == "__main__":

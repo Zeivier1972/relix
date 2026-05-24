@@ -96,6 +96,17 @@ class LeadDatabase:
         """)
 
         cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS reddit_replies (
+                id {_PK},
+                lead_id INTEGER NOT NULL UNIQUE,
+                reply_text TEXT,
+                marked_replied INTEGER DEFAULT 0,
+                replied_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS dm_queue (
                 id {_PK},
                 lead_id INTEGER,
@@ -371,6 +382,92 @@ class LeadDatabase:
         cur.close()
         conn.close()
         return [dict(r) for r in rows]
+
+    # ── Reddit replies ────────────────────────────────────────────────────────
+
+    def get_hot_reddit_leads(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """HOT Reddit leads joined with their cached reply and replied status."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            SELECT l.id, l.name, l.source, l.property_url, l.created_at, l.raw_data,
+                   q.score, q.reasoning,
+                   r.reply_text, r.marked_replied, r.replied_at
+            FROM leads l
+            JOIN qualifications q ON l.id = q.lead_id
+            LEFT JOIN reddit_replies r ON l.id = r.lead_id
+            WHERE l.source = 'reddit' AND q.score = 'HOT'
+            ORDER BY l.created_at DESC
+            LIMIT {PH}
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            if d.get("raw_data") and isinstance(d["raw_data"], str):
+                try:
+                    d["raw_data"] = json.loads(d["raw_data"])
+                except Exception:
+                    d["raw_data"] = {}
+            result.append(d)
+        return result
+
+    def save_reddit_reply(self, lead_id: int, reply_text: str):
+        """Cache a generated Reddit reply for a lead."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO reddit_replies (lead_id, reply_text)
+                VALUES (%s, %s)
+                ON CONFLICT (lead_id) DO UPDATE SET reply_text = EXCLUDED.reply_text
+            """, (lead_id, reply_text))
+        else:
+            cur.execute("""
+                INSERT INTO reddit_replies (lead_id, reply_text)
+                VALUES (?, ?)
+                ON CONFLICT (lead_id) DO UPDATE SET reply_text = excluded.reply_text
+            """, (lead_id, reply_text))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def get_reddit_reply(self, lead_id: int) -> Optional[Dict[str, Any]]:
+        """Return the cached reply row for a lead, or None."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"SELECT * FROM reddit_replies WHERE lead_id = {PH}", (lead_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+
+    def mark_reddit_replied(self, lead_id: int, replied: bool):
+        """Toggle the replied flag for a Reddit lead."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        ts = datetime.now() if replied else None
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO reddit_replies (lead_id, marked_replied, replied_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (lead_id) DO UPDATE
+                    SET marked_replied = EXCLUDED.marked_replied,
+                        replied_at     = EXCLUDED.replied_at
+            """, (lead_id, int(replied), ts))
+        else:
+            cur.execute("""
+                INSERT INTO reddit_replies (lead_id, marked_replied, replied_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT (lead_id) DO UPDATE
+                    SET marked_replied = excluded.marked_replied,
+                        replied_at     = excluded.replied_at
+            """, (lead_id, int(replied), ts))
+        conn.commit()
+        cur.close()
+        conn.close()
 
     # ── DM Queue ──────────────────────────────────────────────────────────────
 

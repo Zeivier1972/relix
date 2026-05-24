@@ -384,6 +384,82 @@
       border-top-color: var(--tiffany); border-radius: 50%;
       animation: sp .7s linear infinite;
     }
+
+    /* ── Reddit Leads tab ────────────────────── */
+    .reddit-card {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-left: 4px solid #ef4444;
+      margin-bottom: 10px;
+      transition: box-shadow .15s;
+    }
+    .reddit-card:hover { box-shadow: var(--sh-md); }
+    .reddit-card.replied-done { border-left-color: #22c55e; opacity: .75; }
+
+    .post-title {
+      font-size: .88rem; font-weight: 600;
+      color: var(--text);
+      margin: 6px 0 4px;
+      line-height: 1.4;
+    }
+    .post-excerpt {
+      font-size: .77rem; color: var(--muted);
+      line-height: 1.5; margin-bottom: 10px;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .subreddit-tag {
+      font-size: .65rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      background: #fff3e0; color: #c2410c;
+    }
+    .replied-badge {
+      font-size: .62rem; font-weight: 700;
+      padding: 2px 8px; border-radius: 4px;
+      background: #f0fdf4; color: #16a34a;
+    }
+    .reply-box {
+      background: #f8fffe;
+      border: 1px solid #b2eeec;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: .8rem; color: #1e3a39;
+      line-height: 1.6;
+      margin: 10px 0;
+      white-space: pre-wrap;
+      display: none;
+    }
+    .reply-box.open { display: block; }
+    .btn-copy-reply {
+      background: var(--tiffany);
+      color: white; border: none;
+      border-radius: 6px; padding: 6px 12px;
+      font-size: .73rem; font-weight: 700;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      transition: background .15s;
+    }
+    .btn-copy-reply:hover    { background: var(--tiffany-dark); }
+    .btn-copy-reply:disabled { background: var(--muted); cursor: not-allowed; }
+    .btn-copy-reply.copied   { background: #16a34a; }
+    .replied-label {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: .75rem; color: var(--muted);
+      cursor: pointer; user-select: none;
+    }
+    .replied-label input[type=checkbox] {
+      width: 15px; height: 15px; accent-color: var(--tiffany); cursor: pointer;
+    }
+    .reddit-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px; margin: 16px 0;
+    }
   </style>
 </head>
 <body>
@@ -396,6 +472,7 @@
 <div class="tabs">
   <button class="tab-btn active" onclick="switchTab('leads')">📊 Leads</button>
   <button class="tab-btn" onclick="switchTab('dm')">💬 DM Manager</button>
+  <button class="tab-btn" onclick="switchTab('reddit')">🟠 Reddit Leads</button>
 </div>
 
 <!-- ══════════════════ LEADS TAB ══════════════════ -->
@@ -507,6 +584,42 @@
 </div><!-- /container -->
 </div><!-- /tab-dm -->
 
+<!-- ══════════════════ REDDIT LEADS TAB ══════════════════ -->
+<div class="tab-panel" id="tab-reddit">
+<div class="container">
+
+  <div class="reddit-stats" style="margin-top:16px;">
+    <div class="dm-stat" style="border-left:4px solid #ef4444;">
+      <div class="lbl">🔥 HOT Reddit</div>
+      <div class="val" id="reddit-total" style="color:var(--hot);">—</div>
+    </div>
+    <div class="dm-stat" style="border-left:4px solid #22c55e;">
+      <div class="lbl">✅ Replied</div>
+      <div class="val" id="reddit-replied-count" style="color:#22c55e;">—</div>
+    </div>
+    <div class="dm-stat" style="border-left:4px solid var(--warm);">
+      <div class="lbl">⏳ Not Replied</div>
+      <div class="val" id="reddit-pending-count" style="color:var(--warm);">—</div>
+    </div>
+  </div>
+
+  <div class="feed-hdr" style="margin-top:4px;">
+    <h2>HOT Reddit Leads — Reply Queue</h2>
+    <button class="btn-refresh" onclick="loadRedditLeads()">↻ Refresh</button>
+  </div>
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:14px;">
+    Claude AI generates a personalized reply based on exactly what each person posted. Click <strong>Copy Reply</strong> then paste it on Reddit.
+  </p>
+
+  <div id="reddit-feed">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="footer" id="reddit-footer"></div>
+
+</div>
+</div><!-- /tab-reddit -->
+
 <script>
 const PLATFORM = {
   instagram_hashtags: 'Instagram',
@@ -554,7 +667,7 @@ function snippet(lead) {
   } catch { return ''; }
 }
 
-function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function renderLeads(leads) {
   const feed = document.getElementById('feed');
@@ -660,11 +773,133 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   document.querySelectorAll('.tab-btn').forEach(b => {
-    if (b.textContent.toLowerCase().includes(name === 'leads' ? 'leads' : 'dm')) {
-      b.classList.add('active');
-    }
+    if (b.getAttribute('onclick') === `switchTab('${name}')`) b.classList.add('active');
   });
-  if (name === 'dm') loadDMStatus();
+  if (name === 'dm')     loadDMStatus();
+  if (name === 'reddit') loadRedditLeads();
+}
+
+// ── Reddit Leads ────────────────────────────────────────────────────────────
+
+function renderRedditFeed(leads) {
+  const feed = document.getElementById('reddit-feed');
+  if (!leads || !leads.length) {
+    feed.innerHTML = '<div class="empty">No HOT Reddit leads yet. Run a scan to find them.</div>';
+    return;
+  }
+
+  const replied   = leads.filter(l => l.marked_replied).length;
+  const notReplied = leads.length - replied;
+  document.getElementById('reddit-total').textContent         = leads.length;
+  document.getElementById('reddit-replied-count').textContent = replied;
+  document.getElementById('reddit-pending-count').textContent = notReplied;
+
+  feed.innerHTML = leads.map(l => {
+    const raw       = l.raw_data || {};
+    const title     = raw.title    || '(no title)';
+    const excerpt   = raw.selftext || '';
+    const subreddit = raw.subreddit || 'reddit';
+    const isReplied = !!l.marked_replied;
+    const hasReply  = !!l.reply_text;
+    const replyTxt  = l.reply_text || '';
+
+    return `
+      <div class="reddit-card${isReplied ? ' replied-done' : ''}" id="rcard-${l.id}">
+        <div class="card-top" style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:6px;">
+          <span class="score HOT">HOT</span>
+          <span class="subreddit-tag">r/${esc(subreddit)}</span>
+          <span style="font-weight:600;font-size:.88rem;">u/${esc(l.name)}</span>
+          <span style="font-size:.7rem;color:var(--muted);margin-left:auto;">${ago(l.created_at)}</span>
+          ${isReplied ? `<span class="replied-badge">✅ Replied</span>` : ''}
+        </div>
+        <div class="post-title">${esc(title)}</div>
+        ${excerpt ? `<div class="post-excerpt">${esc(excerpt)}</div>` : ''}
+        <div class="actions" style="margin-bottom:8px;">
+          ${l.property_url
+            ? `<a class="btn" href="${esc(l.property_url)}" target="_blank" rel="noopener">↗ View Post</a>`
+            : `<a class="btn" href="https://reddit.com/u/${esc(l.name)}" target="_blank" rel="noopener">↗ View Profile</a>`}
+          <button class="btn-copy-reply" id="copybtn-${l.id}" onclick="copyReply(${l.id}, this)">
+            📋 Copy Reply
+          </button>
+          <label class="replied-label">
+            <input type="checkbox" id="rcheck-${l.id}"
+              ${isReplied ? 'checked' : ''}
+              onchange="markReplied(${l.id}, this.checked)">
+            Mark as Replied
+          </label>
+        </div>
+        <div class="reply-box${hasReply ? ' open' : ''}" id="rreply-${l.id}">${esc(replyTxt)}</div>
+      </div>`;
+  }).join('');
+}
+
+async function loadRedditLeads() {
+  try {
+    const res  = await fetch('/api/reddit-leads?limit=100');
+    const data = await res.json();
+    renderRedditFeed(data.leads || []);
+    document.getElementById('reddit-footer').textContent =
+      `${data.count} HOT Reddit leads · Updated ${new Date().toLocaleTimeString()}`;
+  } catch(e) { console.error('reddit-leads error', e); }
+}
+
+async function copyReply(leadId, btn) {
+  const replyBox = document.getElementById('rreply-' + leadId);
+
+  // If already generated, copy immediately
+  if (replyBox.textContent.trim()) {
+    await navigator.clipboard.writeText(replyBox.textContent.trim());
+    btn.textContent = '✅ Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 Copy Reply'; btn.classList.remove('copied'); }, 2500);
+    replyBox.classList.add('open');
+    return;
+  }
+
+  // Generate with Claude
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Generating…';
+  try {
+    const res  = await fetch(`/api/reddit-leads/${leadId}/generate-reply`, { method: 'POST' });
+    const data = await res.json();
+    if (data.reply) {
+      replyBox.textContent = data.reply;
+      replyBox.classList.add('open');
+      await navigator.clipboard.writeText(data.reply);
+      btn.textContent = '✅ Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = '📋 Copy Reply'; btn.classList.remove('copied'); btn.disabled = false; }, 2500);
+    } else {
+      btn.textContent = '❌ Error';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+    console.error(e);
+  }
+}
+
+async function markReplied(leadId, checked) {
+  const card = document.getElementById('rcard-' + leadId);
+  try {
+    await fetch(`/api/reddit-leads/${leadId}/mark-replied`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ replied: checked }),
+    });
+    if (checked) {
+      card.classList.add('replied-done');
+      const badge = card.querySelector('.score');
+      if (badge && !card.querySelector('.replied-badge')) {
+        badge.insertAdjacentHTML('afterend', '<span class="replied-badge">✅ Replied</span>');
+      }
+    } else {
+      card.classList.remove('replied-done');
+      const badge = card.querySelector('.replied-badge');
+      if (badge) badge.remove();
+    }
+  } catch(e) { console.error('mark-replied error', e); }
 }
 
 // ── DM Manager ─────────────────────────────────────────────────────────────

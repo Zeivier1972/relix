@@ -136,6 +136,66 @@ REASONING: [2-3 oraciones explicando tu decision]"""
         
         return score, reasoning
     
+    def generate_reddit_reply(self, lead_data: Dict) -> str:
+        """Generate a personalized reply to a Reddit post as Catherine Gomez."""
+        raw = lead_data.get("raw_data") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+
+        title    = raw.get("title", "")
+        selftext = raw.get("selftext", "")
+        subreddit = raw.get("subreddit", "")
+        post_text = f"{title}\n{selftext}".strip()
+
+        # Detect language from post content
+        spanish_signals = [
+            "comprar","casa","busco","quiero","primera","mudanza","colombia","precio",
+            "ayuda","necesito","invertir","inversión","familia","vivir","mudarse",
+            "propiedades","florida","miami","cuánto","cómo","dónde","cuándo",
+            "hola","gracias","soy","tengo","estoy","quería","quisiera",
+        ]
+        is_spanish = any(w in post_text.lower() for w in spanish_signals)
+
+        if is_spanish:
+            system = (
+                "Eres Catherine Gomez, agente inmobiliaria en South Florida especializada en "
+                "pre-construcción para compradores colombianos y latinos. "
+                "Escribe una respuesta genuina y útil a este post de Reddit. "
+                "Requisitos: "
+                "1) Empieza reconociendo algo ESPECÍFICO de lo que escribió la persona (su pregunta, situación o meta). "
+                "2) Sé concisa — máximo 4-5 oraciones en total. "
+                "3) Menciona brevemente tu especialidad (pre-construcción en Miami/South Florida para compradores latinos) de manera natural. "
+                "4) Termina con una oferta amistosa de enviarle un DM con más información. "
+                "5) Suena como una persona real ayudando, NO como publicidad. "
+                "6) Escribe en español ya que el post está en español."
+            )
+            user_msg = f"Escribe una respuesta para este post de r/{subreddit}:\n\n{post_text}"
+        else:
+            system = (
+                "You are Catherine Gomez, a South Florida real estate agent specializing in "
+                "pre-construction homes for Colombian and Latino buyers. "
+                "Write a genuine, helpful reply to this Reddit post. "
+                "Requirements: "
+                "1) Open by acknowledging something SPECIFIC from their post (their question, situation, or goal). "
+                "2) Keep it to 4-5 sentences total. "
+                "3) Briefly and naturally mention your specialty (pre-construction in Miami/South Florida for Latino buyers). "
+                "4) End with a friendly offer to DM for more details. "
+                "5) Sound like a real person helping, NOT an advertisement. "
+                "6) Write in English since the post is in English."
+            )
+            user_msg = f"Write a reply for this post on r/{subreddit}:\n\n{post_text}"
+
+        response = self.client.messages.create(
+            model=self.model,
+            max_tokens=400,
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        return response.content[0].text.strip()
+
     async def bulk_qualify_leads(self, leads: list, language: str = "english") -> list:
         """Qualify multiple leads."""
         qualified_leads = []
