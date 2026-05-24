@@ -5,12 +5,15 @@ import asyncio
 import json
 import os
 import random
-import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from database import get_db_connection, _cursor, PH, USE_POSTGRES
 
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME", "")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD", "")
@@ -96,60 +99,57 @@ def _build_message(ig_username: str, source: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _init_dm_table():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS dm_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            lead_id INTEGER,
-            instagram_username TEXT NOT NULL,
-            source TEXT,
-            message_preview TEXT,
-            status TEXT DEFAULT 'sent',
-            error_message TEXT,
-            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+    # dm_log is now created by LeadDatabase.init_db() — nothing to do here
+    pass
 
 
 def _count_dms_today() -> int:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT COUNT(*) FROM dm_log WHERE date(sent_at) = ? AND status = 'sent'",
-        (date.today().isoformat(),),
-    ).fetchone()
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(
+        f"SELECT COUNT(*) AS cnt FROM dm_log WHERE sent_at >= {PH} AND sent_at < {PH} AND status = 'sent'",
+        (today, tomorrow),
+    )
+    row = cur.fetchone()
+    cur.close()
     conn.close()
-    return row[0] if row else 0
+    return row["cnt"] if row else 0
 
 
 def _already_dmed(username: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT id FROM dm_log WHERE instagram_username = ? AND status = 'sent'",
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(
+        f"SELECT id FROM dm_log WHERE instagram_username = {PH} AND status = 'sent'",
         (username,),
-    ).fetchone()
+    )
+    found = cur.fetchone() is not None
+    cur.close()
     conn.close()
-    return row is not None
+    return found
 
 
 def _log_dm(lead_id: Optional[int], username: str, source: str,
             message: str, status: str = "sent", error: str = None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """INSERT INTO dm_log
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(
+        f"""INSERT INTO dm_log
                (lead_id, instagram_username, source, message_preview, status, error_message)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+           VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH})""",
         (lead_id, username, source, message[:120], status, error),
     )
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def get_pending_dm_leads() -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute("""
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(f"""
         SELECT l.id, l.name, l.source, l.property_url, l.created_at, q.score,
                CASE q.score WHEN 'HOT' THEN 'DM today' ELSE 'DM within 48 hours' END AS dm_urgency
         FROM leads l
@@ -162,17 +162,19 @@ def get_pending_dm_leads() -> List[Dict]:
         ORDER BY CASE q.score WHEN 'HOT' THEN 1 WHEN 'WARM' THEN 2 ELSE 3 END,
                  l.created_at DESC
         LIMIT 50
-    """).fetchall()
+    """)
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def get_dm_log(limit: int = 100) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT * FROM dm_log ORDER BY sent_at DESC LIMIT ?", (limit,)
-    ).fetchall()
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(f"SELECT * FROM dm_log ORDER BY sent_at DESC LIMIT {PH}", (limit,))
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
     return [dict(r) for r in rows]
 

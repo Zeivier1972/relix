@@ -1,30 +1,60 @@
-import sqlite3
-import json
-from datetime import datetime
-from typing import Optional, List, Dict, Any
 import os
+import json
+from datetime import datetime, timedelta, date
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
 load_dotenv()
 
+DATABASE_URL = os.getenv("DATABASE_URL")
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
+USE_POSTGRES = bool(DATABASE_URL)
+
+if USE_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+    PH = "%s"
+    _IntegrityError = psycopg2.IntegrityError
+    _PK = "SERIAL PRIMARY KEY"
+else:
+    import sqlite3
+    PH = "?"
+    _IntegrityError = sqlite3.IntegrityError
+    _PK = "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+
+def get_db_connection():
+    """Return a database connection for the active backend."""
+    if USE_POSTGRES:
+        return psycopg2.connect(DATABASE_URL)
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def _cursor(conn):
+    if USE_POSTGRES:
+        return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    else:
+        return conn.cursor()
 
 
 class LeadDatabase:
-    """SQLite database for lead storage with duplicate detection."""
-    
+    """Database for lead storage with duplicate detection. Supports PostgreSQL and SQLite."""
+
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
         self.init_db()
-    
+
     def init_db(self):
-        """Initialize database with leads table."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        """Initialize database tables."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS leads (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {_PK},
                 name TEXT NOT NULL,
                 email TEXT,
                 phone TEXT,
@@ -39,10 +69,10 @@ class LeadDatabase:
                 UNIQUE(email, phone, property_address)
             )
         """)
-        
-        cursor.execute("""
+
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS qualifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id {_PK},
                 lead_id INTEGER NOT NULL,
                 score TEXT,
                 reasoning TEXT,
@@ -51,33 +81,48 @@ class LeadDatabase:
                 FOREIGN KEY (lead_id) REFERENCES leads(id)
             )
         """)
-        
+
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS dm_log (
+                id {_PK},
+                lead_id INTEGER,
+                instagram_username TEXT NOT NULL,
+                source TEXT,
+                message_preview TEXT,
+                status TEXT DEFAULT 'sent',
+                error_message TEXT,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
+        cur.close()
         conn.close()
-    
+
     def check_duplicate(self, email: Optional[str] = None, phone: Optional[str] = None,
-                       property_address: Optional[str] = None) -> bool:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+                        property_address: Optional[str] = None) -> bool:
+        conn = get_db_connection()
+        cur = _cursor(conn)
 
         if email:
-            cursor.execute("SELECT id FROM leads WHERE email = ?", (email,))
-            if cursor.fetchone():
-                conn.close()
+            cur.execute(f"SELECT id FROM leads WHERE email = {PH}", (email,))
+            if cur.fetchone():
+                cur.close(); conn.close()
                 return True
 
         if phone:
-            cursor.execute("SELECT id FROM leads WHERE phone = ?", (phone,))
-            if cursor.fetchone():
-                conn.close()
+            cur.execute(f"SELECT id FROM leads WHERE phone = {PH}", (phone,))
+            if cur.fetchone():
+                cur.close(); conn.close()
                 return True
 
         if property_address:
-            cursor.execute("SELECT id FROM leads WHERE property_address = ?", (property_address,))
-            if cursor.fetchone():
-                conn.close()
+            cur.execute(f"SELECT id FROM leads WHERE property_address = {PH}", (property_address,))
+            if cur.fetchone():
+                cur.close(); conn.close()
                 return True
 
+        cur.close()
         conn.close()
         return False
 
@@ -85,160 +130,154 @@ class LeadDatabase:
         """Return True if this username was already saved within the last N days."""
         if not name:
             return False
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id FROM leads WHERE name = ? AND created_at >= datetime('now', ?)",
-            (name, f"-{days} days"),
+        cutoff = datetime.now() - timedelta(days=days)
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"SELECT id FROM leads WHERE name = {PH} AND created_at >= {PH}",
+            (name, cutoff),
         )
-        found = cursor.fetchone() is not None
+        found = cur.fetchone() is not None
+        cur.close()
         conn.close()
         return found
 
     def get_lead_by_username(self, username: str) -> Optional[Dict[str, Any]]:
         """Look up the most recent lead whose name matches the given username."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM leads WHERE name = ? ORDER BY created_at DESC LIMIT 1",
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"SELECT * FROM leads WHERE name = {PH} ORDER BY created_at DESC LIMIT 1",
             (username,),
         )
-        row = cursor.fetchone()
+        row = cur.fetchone()
+        cur.close()
         conn.close()
         return dict(row) if row else None
 
     def add_lead(self, name: str, email: Optional[str] = None, phone: Optional[str] = None,
-                property_url: Optional[str] = None, property_address: Optional[str] = None,
-                source: str = "unknown", raw_data: Optional[Dict] = None) -> Optional[int]:
+                 property_url: Optional[str] = None, property_address: Optional[str] = None,
+                 source: str = "unknown", raw_data: Optional[Dict] = None) -> Optional[int]:
         """Add a new lead to database, skipping duplicates and recent usernames."""
         if self.is_recent_username(name):
             return None
         if self.check_duplicate(email, phone, property_address):
             return None
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
+
         raw_data_json = json.dumps(raw_data) if raw_data else None
-        
+        conn = get_db_connection()
+        cur = _cursor(conn)
+
         try:
-            cursor.execute("""
-                INSERT INTO leads (name, email, phone, property_url, property_address, source, raw_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, email, phone, property_url, property_address, source, raw_data_json))
-            
-            lead_id = cursor.lastrowid
+            if USE_POSTGRES:
+                cur.execute(f"""
+                    INSERT INTO leads (name, email, phone, property_url, property_address, source, raw_data)
+                    VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})
+                    RETURNING id
+                """, (name, email, phone, property_url, property_address, source, raw_data_json))
+                row = cur.fetchone()
+                lead_id = row["id"]
+            else:
+                cur.execute(f"""
+                    INSERT INTO leads (name, email, phone, property_url, property_address, source, raw_data)
+                    VALUES ({PH}, {PH}, {PH}, {PH}, {PH}, {PH}, {PH})
+                """, (name, email, phone, property_url, property_address, source, raw_data_json))
+                lead_id = cur.lastrowid
+
             conn.commit()
+            cur.close()
             conn.close()
             return lead_id
-        except sqlite3.IntegrityError:
+        except _IntegrityError:
+            cur.close()
             conn.close()
             return None
-    
+
     def get_lead(self, lead_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve a lead by ID."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM leads WHERE id = ?", (lead_id,))
-        row = cursor.fetchone()
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"SELECT * FROM leads WHERE id = {PH}", (lead_id,))
+        row = cur.fetchone()
+        cur.close()
         conn.close()
-        
-        if row:
-            return dict(row)
-        return None
-    
+        return dict(row) if row else None
+
     def get_new_leads(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get unqualified leads."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT * FROM leads 
-            WHERE lead_status = 'NEW' 
-            ORDER BY created_at DESC 
-            LIMIT ?
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            SELECT * FROM leads
+            WHERE lead_status = 'NEW'
+            ORDER BY created_at DESC
+            LIMIT {PH}
         """, (limit,))
-        
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        
-        return [dict(row) for row in rows]
-    
+        return [dict(r) for r in rows]
+
     def update_lead_status(self, lead_id: int, status: str):
         """Update lead status."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE leads 
-            SET lead_status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            UPDATE leads
+            SET lead_status = {PH}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = {PH}
         """, (status, lead_id))
-        
         conn.commit()
+        cur.close()
         conn.close()
-    
+
     def add_qualification(self, lead_id: int, score: str, reasoning: str, ai_analysis: Optional[str] = None):
         """Add qualification result for a lead."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
             INSERT INTO qualifications (lead_id, score, reasoning, ai_analysis)
-            VALUES (?, ?, ?, ?)
+            VALUES ({PH}, {PH}, {PH}, {PH})
         """, (lead_id, score, reasoning, ai_analysis))
-        
         conn.commit()
+        cur.close()
         conn.close()
-        
-        # Update lead status to QUALIFIED
         self.update_lead_status(lead_id, "QUALIFIED")
-    
+
     def get_hot_leads(self) -> List[Dict[str, Any]]:
         """Get all HOT qualified leads."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute("""
             SELECT l.* FROM leads l
             JOIN qualifications q ON l.id = q.lead_id
             WHERE q.score = 'HOT'
             ORDER BY l.created_at DESC
         """)
-        
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        
-        return [dict(row) for row in rows]
-    
+        return [dict(r) for r in rows]
+
     def get_all_leads(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get all leads."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
             SELECT * FROM leads
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT {PH}
         """, (limit,))
-
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-
-        return [dict(row) for row in rows]
+        return [dict(r) for r in rows]
 
     def get_leads_with_dm_status(self, limit: int = 500) -> List[Dict[str, Any]]:
         """HOT/WARM leads joined with their most recent DM status."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
             SELECT
                 l.id, l.name, l.source, l.property_url, l.created_at,
                 q.score,
@@ -255,37 +294,42 @@ class LeadDatabase:
             JOIN qualifications q ON l.id = q.lead_id
             WHERE q.score IN ('HOT', 'WARM')
             ORDER BY q.score DESC, l.created_at DESC
-            LIMIT ?
+            LIMIT {PH}
         """, (limit,))
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        return [dict(row) for row in rows]
+        return [dict(r) for r in rows]
 
     def get_dm_stats(self) -> Dict[str, int]:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        sent = cursor.execute(
-            "SELECT COUNT(DISTINCT instagram_username) FROM dm_log WHERE status='sent'"
-        ).fetchone()[0]
-        replied = cursor.execute(
-            "SELECT COUNT(DISTINCT instagram_username) FROM dm_log WHERE status='replied'"
-        ).fetchone()[0]
-        pending = cursor.execute("""
-            SELECT COUNT(*) FROM leads l
+        conn = get_db_connection()
+        cur = _cursor(conn)
+
+        cur.execute("SELECT COUNT(DISTINCT instagram_username) AS cnt FROM dm_log WHERE status='sent'")
+        sent = cur.fetchone()["cnt"]
+
+        cur.execute("SELECT COUNT(DISTINCT instagram_username) AS cnt FROM dm_log WHERE status='replied'")
+        replied = cur.fetchone()["cnt"]
+
+        cur.execute(f"""
+            SELECT COUNT(*) AS cnt FROM leads l
             JOIN qualifications q ON l.id = q.lead_id
             WHERE l.source IN ('instagram_hashtags','instagram_comments','instagram')
               AND q.score IN ('HOT','WARM')
               AND l.name NOT IN (
                   SELECT instagram_username FROM dm_log WHERE status='sent'
               )
-        """).fetchone()[0]
+        """)
+        pending = cur.fetchone()["cnt"]
+
+        cur.close()
         conn.close()
         return {"sent": sent, "pending": pending, "replied": replied}
 
     def get_stats(self) -> Dict[str, int]:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute("""
             SELECT
                 COUNT(DISTINCT l.id)                                            AS total,
                 COUNT(DISTINCT CASE WHEN q.score = 'HOT'  THEN l.id END)       AS hot,
@@ -294,21 +338,22 @@ class LeadDatabase:
             FROM leads l
             LEFT JOIN qualifications q ON l.id = q.lead_id
         """)
-        row = cursor.fetchone()
+        row = cur.fetchone()
+        cur.close()
         conn.close()
-        return {"total": row[0], "hot": row[1], "warm": row[2], "cold": row[3]}
+        return {"total": row["total"], "hot": row["hot"], "warm": row["warm"], "cold": row["cold"]}
 
     def get_leads_with_scores(self, limit: int = 200) -> List[Dict[str, Any]]:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute("""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
             SELECT l.*, q.score
             FROM leads l
             LEFT JOIN qualifications q ON l.id = q.lead_id
             ORDER BY l.created_at DESC
-            LIMIT ?
+            LIMIT {PH}
         """, (limit,))
-        rows = cursor.fetchall()
+        rows = cur.fetchall()
+        cur.close()
         conn.close()
-        return [dict(row) for row in rows]
+        return [dict(r) for r in rows]
