@@ -523,5 +523,32 @@ async def run_dm_bot():
     await bot.run()
 
 
+async def send_dm_to_lead(lead_id: int, ig_username: str, source: str) -> dict:
+    """Send a single DM to one specific lead. Used by the dashboard send button."""
+    if _already_dmed(ig_username):
+        return {"status": "already_sent", "username": ig_username}
+
+    message = _build_message(ig_username, source)
+    result = {"username": ig_username, "message_preview": message[:100], "status": "unknown"}
+
+    bot = InstagramDMBot()
+    async with async_playwright() as p:
+        await bot.setup(p)
+        if not await bot.login():
+            await bot.teardown()
+            result["status"] = "login_failed"
+            return result
+        success = await bot.send_dm(ig_username, message, lead_id=lead_id, source=source)
+        await bot.teardown()
+        result["status"] = "sent" if success else "failed"
+
+    return result
+
+
+def build_dm_preview(ig_username: str, source: str) -> str:
+    """Return the pre-written DM that would be sent to this lead."""
+    return _build_message(ig_username, source)
+
+
 if __name__ == "__main__":
     asyncio.run(run_dm_bot())

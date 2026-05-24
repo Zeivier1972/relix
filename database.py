@@ -233,6 +233,55 @@ class LeadDatabase:
 
         return [dict(row) for row in rows]
 
+    def get_leads_with_dm_status(self, limit: int = 500) -> List[Dict[str, Any]]:
+        """HOT/WARM leads joined with their most recent DM status."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                l.id, l.name, l.source, l.property_url, l.created_at,
+                q.score,
+                COALESCE(
+                    (SELECT d.status FROM dm_log d
+                     WHERE d.instagram_username = l.name
+                     ORDER BY d.sent_at DESC LIMIT 1),
+                    'not_sent'
+                ) AS dm_status,
+                (SELECT d.sent_at FROM dm_log d
+                 WHERE d.instagram_username = l.name
+                 ORDER BY d.sent_at DESC LIMIT 1) AS dm_sent_at
+            FROM leads l
+            JOIN qualifications q ON l.id = q.lead_id
+            WHERE q.score IN ('HOT', 'WARM')
+            ORDER BY q.score DESC, l.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_dm_stats(self) -> Dict[str, int]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        sent = cursor.execute(
+            "SELECT COUNT(DISTINCT instagram_username) FROM dm_log WHERE status='sent'"
+        ).fetchone()[0]
+        replied = cursor.execute(
+            "SELECT COUNT(DISTINCT instagram_username) FROM dm_log WHERE status='replied'"
+        ).fetchone()[0]
+        pending = cursor.execute("""
+            SELECT COUNT(*) FROM leads l
+            JOIN qualifications q ON l.id = q.lead_id
+            WHERE l.source IN ('instagram_hashtags','instagram_comments','instagram')
+              AND q.score IN ('HOT','WARM')
+              AND l.name NOT IN (
+                  SELECT instagram_username FROM dm_log WHERE status='sent'
+              )
+        """).fetchone()[0]
+        conn.close()
+        return {"sent": sent, "pending": pending, "replied": replied}
+
     def get_stats(self) -> Dict[str, int]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()

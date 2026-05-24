@@ -19,7 +19,8 @@ from scrapers.reddit_scraper import RedditScraper
 from qualifier.claude_qualifier import ClaudeLeadQualifier
 from pipeline.twilio_alert import TwilioWhatsAppAlerts
 from pipeline.lofty import LoftyCRMClient
-from pipeline.phantom import run_dm_bot, get_dm_log, _count_dms_today
+from pipeline.phantom import (run_dm_bot, get_dm_log, _count_dms_today,
+                              send_dm_to_lead, build_dm_preview)
 
 PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
@@ -447,6 +448,43 @@ async def phantom_status():
         "daily_limit": 8,
         "recent_log": get_dm_log(limit=50),
         "timestamp": datetime.now().isoformat(),
+    }
+
+
+@app.get("/api/dm-status")
+async def api_dm_status():
+    return {
+        "stats": db.get_dm_stats(),
+        "leads": db.get_leads_with_dm_status(limit=500),
+        "dms_today": _count_dms_today(),
+        "daily_limit": 8,
+    }
+
+
+@app.get("/api/dm/preview/{lead_id}")
+async def dm_preview(lead_id: int):
+    lead = db.get_lead(lead_id)
+    if not lead:
+        return {"error": "Lead not found"}
+    return {
+        "lead_id": lead_id,
+        "username": lead.get("name"),
+        "message": build_dm_preview(lead.get("name", ""), lead.get("source", "")),
+    }
+
+
+@app.post("/api/dm/send/{lead_id}")
+async def dm_send_one(lead_id: int, background_tasks: BackgroundTasks):
+    lead = db.get_lead(lead_id)
+    if not lead:
+        return {"error": "Lead not found"}
+    ig_username = lead.get("name", "")
+    source = lead.get("source", "")
+    background_tasks.add_task(send_dm_to_lead, lead_id, ig_username, source)
+    return {
+        "status": "queued",
+        "username": ig_username,
+        "message_preview": build_dm_preview(ig_username, source)[:120],
     }
 
 
