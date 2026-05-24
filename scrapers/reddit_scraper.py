@@ -1,6 +1,9 @@
 import asyncio
+import time
 import httpx
 from typing import List, Dict, Any
+
+MAX_POST_AGE_HOURS = 48
 
 SUBREDDITS = [
     # ── Florida markets ───────────────────────────────────────────────────
@@ -83,9 +86,14 @@ class RedditScraper:
             resp.raise_for_status()
             data = resp.json()
             posts = data.get("data", {}).get("children", [])
+            cutoff_ts = time.time() - MAX_POST_AGE_HOURS * 3600
             leads = []
             for post in posts:
                 p = post.get("data", {})
+                # Skip posts older than 48 hours
+                created_utc = p.get("created_utc") or 0
+                if created_utc < cutoff_ts:
+                    continue
                 title = p.get("title", "")
                 selftext = p.get("selftext", "")
                 combined = f"{title} {selftext}"
@@ -107,6 +115,7 @@ class RedditScraper:
                         "num_comments": p.get("num_comments"),
                         "url": p.get("url"),
                         "permalink": p.get("permalink"),
+                        "created_utc": int(created_utc),
                     },
                 })
             return leads

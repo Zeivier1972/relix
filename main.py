@@ -392,7 +392,16 @@ def schedule_jobs():
 
 @app.on_event("startup")
 async def startup_event():
+    from database import USE_POSTGRES, DATABASE_URL
+    backend = "PostgreSQL ✓" if USE_POSTGRES else "SQLite ⚠️  (DATA WILL BE LOST ON REDEPLOY — set DATABASE_URL)"
+    print("=" * 60)
     print("RELIX Lead Generation System starting...")
+    print(f"  Database backend : {backend}")
+    if USE_POSTGRES:
+        # Mask credentials but show host for confirmation
+        safe_url = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "connected"
+        print(f"  Postgres host    : {safe_url}")
+    print("=" * 60)
     schedule_jobs()
     print("[+] Scheduler: Tier1=6h | Tier2=12h | Tier3=daily@6am")
 
@@ -603,6 +612,24 @@ async def push_lead_by_username(contact: dict):
     if result:
         return {"status": "pushed", "lead_id": lead.get("id"), "name": enriched.get("name")}
     return {"status": "skipped", "reason": "webhook not configured"}
+
+
+@app.get("/api/db-info")
+async def db_info():
+    from database import USE_POSTGRES, DATABASE_URL, DB_PATH
+    stats = db.get_stats()
+    info = {
+        "backend": "postgresql" if USE_POSTGRES else "sqlite",
+        "persistent": USE_POSTGRES,
+        "warning": None if USE_POSTGRES else "SQLite is in use — all data is lost on redeploy. Add DATABASE_URL in Railway.",
+        "stats": stats,
+    }
+    if USE_POSTGRES:
+        safe_url = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "connected"
+        info["postgres_host"] = safe_url
+    else:
+        info["sqlite_path"] = DB_PATH
+    return info
 
 
 @app.get("/api/reddit-leads")

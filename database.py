@@ -386,7 +386,8 @@ class LeadDatabase:
     # ── Reddit replies ────────────────────────────────────────────────────────
 
     def get_hot_reddit_leads(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """HOT Reddit leads joined with their cached reply and replied status."""
+        """HOT Reddit leads (discovered in last 48 h) with cached reply and replied status."""
+        cutoff = datetime.now() - timedelta(hours=48)
         conn = get_db_connection()
         cur = _cursor(conn)
         cur.execute(f"""
@@ -397,9 +398,10 @@ class LeadDatabase:
             JOIN qualifications q ON l.id = q.lead_id
             LEFT JOIN reddit_replies r ON l.id = r.lead_id
             WHERE l.source = 'reddit' AND q.score = 'HOT'
+              AND l.created_at >= {PH}
             ORDER BY l.created_at DESC
             LIMIT {PH}
-        """, (limit,))
+        """, (cutoff, limit))
         rows = cur.fetchall()
         cur.close()
         conn.close()
