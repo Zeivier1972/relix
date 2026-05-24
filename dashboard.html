@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RELIX — Catherine Gomez P.A.</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --tiffany:       #0ABAB5;
+      --tiffany-light: #e0faf9;
+      --tiffany-dark:  #007a76;
+      --hot:    #ef4444;
+      --warm:   #f97316;
+      --cold:   #64748b;
+      --new:    #94a3b8;
+      --bg:     #f4fefe;
+      --card:   #ffffff;
+      --text:   #0f172a;
+      --muted:  #64748b;
+      --border: #e2e8f0;
+      --r:      12px;
+      --sh:     0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+      --sh-md:  0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.04);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────── */
+    .header {
+      background: var(--tiffany);
+      color: white;
+      padding: 22px 16px 18px;
+      text-align: center;
+    }
+    .header h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -.02em; }
+    .header p  { font-size: .82rem; opacity: .85; margin-top: 3px; }
+
+    /* ── Layout ──────────────────────────────── */
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    /* ── Stat cards ──────────────────────────── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+    }
+    @media (min-width: 560px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+
+    .stat {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 16px 12px;
+      text-align: center;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+    }
+    .stat .lbl {
+      font-size: .68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .stat .val { font-size: 2rem; font-weight: 700; line-height: 1; }
+    .stat.total .val { color: var(--tiffany); }
+    .stat.hot   .val { color: var(--hot);     }
+    .stat.warm  .val { color: var(--warm);    }
+    .stat.cold  .val { color: var(--cold);    }
+
+    /* ── Control bar ─────────────────────────── */
+    .ctrl {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ctrl-left { display: flex; flex-direction: column; gap: 5px; }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: .87rem;
+      font-weight: 600;
+    }
+    .dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: #22c55e;
+      flex-shrink: 0;
+    }
+    .dot.running { background: var(--tiffany); animation: pulse 1.4s infinite; }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1);   }
+      50%      { opacity:.4; transform:scale(1.4); }
+    }
+
+    .last-run { font-size: .73rem; color: var(--muted); }
+
+    .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .badge {
+      font-size: .68rem; font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: var(--tiffany-light);
+      color: var(--tiffany-dark);
+      border: 1px solid #b2eeec;
+    }
+    .badge b { font-weight: 700; }
+
+    .btn-scan {
+      background: var(--tiffany);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 13px 26px;
+      font-size: .92rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background .15s, transform .1s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-scan:hover    { background: var(--tiffany-dark); }
+    .btn-scan:active   { transform: scale(.97); }
+    .btn-scan:disabled { background: var(--muted); cursor: not-allowed; }
+
+    /* ── Feed header ─────────────────────────── */
+    .feed-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .feed-hdr h2 { font-size: 1rem; font-weight: 700; }
+
+    .btn-refresh {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: .76rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-refresh:hover { border-color: var(--tiffany); color: var(--tiffany); }
+
+    /* ── Lead cards ──────────────────────────── */
+    .feed { display: flex; flex-direction: column; gap: 10px; }
+
+    .card {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      transition: box-shadow .15s;
+    }
+    .card:hover   { box-shadow: var(--sh-md); }
+    .card.hot     { border-left-color: var(--hot);  }
+    .card.warm    { border-left-color: var(--warm); }
+    .card.cold    { border-left-color: var(--cold); }
+    .card.new     { border-left-color: var(--new);  }
+
+    .card-top {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .score {
+      font-size: .62rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+    .score.HOT  { background: #fef2f2; color: var(--hot);  }
+    .score.WARM { background: #fff7ed; color: var(--warm); }
+    .score.COLD { background: #f8fafc; color: var(--cold); }
+    .score.NEW  { background: #f1f5f9; color: var(--new);  }
+
+    .platform {
+      font-size: .65rem; font-weight: 600;
+      padding: 2px 7px; border-radius: 4px;
+      background: var(--tiffany-light);
+      color: var(--tiffany-dark);
+    }
+
+    .lead-name { font-weight: 600; font-size: .88rem; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lead-time { font-size: .7rem; color: var(--muted); margin-left: auto; white-space: nowrap; }
+
+    .snippet {
+      font-size: .78rem;
+      color: var(--muted);
+      line-height: 1.5;
+      margin-bottom: 10px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .dm-box {
+      font-size: .78rem;
+      color: #1e3a39;
+      background: var(--tiffany-light);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      line-height: 1.55;
+      display: none;
+    }
+    .dm-box.open { display: block; }
+
+    .actions { display: flex; gap: 7px; flex-wrap: wrap; }
+
+    .btn {
+      font-size: .73rem; font-weight: 600;
+      padding: 6px 11px; border-radius: 6px;
+      cursor: pointer; border: 1px solid var(--border);
+      background: white; color: var(--text);
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 4px;
+      transition: all .15s;
+    }
+    .btn:hover          { border-color: var(--tiffany); color: var(--tiffany); }
+    .btn.copied         { background: var(--tiffany-light); border-color: var(--tiffany); color: var(--tiffany-dark); }
+
+    /* ── Empty / footer ──────────────────────── */
+    .empty { text-align: center; padding: 48px 16px; color: var(--muted); font-size: .9rem; }
+    .footer { text-align: center; font-size: .7rem; color: var(--muted); margin: 18px 0 28px; }
+
+    /* ── Spinner ─────────────────────────────── */
+    .spin {
+      display: inline-block; width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,.4);
+      border-top-color: white; border-radius: 50%;
+      animation: sp .7s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Catherine Gomez P.A.</h1>
+  <p>Lead Intelligence &nbsp;·&nbsp; RELIX</p>
+</div>
+
+<div class="container">
+
+  <div class="stats">
+    <div class="stat total"><div class="lbl">Total Leads</div><div class="val" id="s-total">—</div></div>
+    <div class="stat hot" ><div class="lbl">🔥 HOT</div>    <div class="val" id="s-hot">—</div></div>
+    <div class="stat warm"><div class="lbl">☀️ WARM</div>   <div class="val" id="s-warm">—</div></div>
+    <div class="stat cold"><div class="lbl">❄️ COLD</div>   <div class="val" id="s-cold">—</div></div>
+  </div>
+
+  <div class="ctrl">
+    <div class="ctrl-left">
+      <div class="status-row">
+        <div class="dot" id="dot"></div>
+        <span id="status-txt">Idle</span>
+      </div>
+      <div class="last-run" id="last-run">Last scan: —</div>
+      <div class="badges" id="badges"></div>
+    </div>
+    <button class="btn-scan" id="scan-btn" onclick="startScan()">Start Scan</button>
+  </div>
+
+  <div class="feed-hdr">
+    <h2>Lead Feed</h2>
+    <button class="btn-refresh" onclick="load()">↻ Refresh</button>
+  </div>
+
+  <div class="feed" id="feed">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="footer" id="footer"></div>
+
+</div>
+
+<script>
+const PLATFORM = {
+  instagram_hashtags: 'Instagram',
+  instagram_comments: 'Instagram',
+  facebook_groups:    'Facebook',
+  tiktok_comments:    'TikTok',
+  reddit:             'Reddit',
+};
+
+const SPANISH_DMS = [
+  'Hola! 👋 Vi tu publicación y me gustaría ayudarte a encontrar tu hogar en Miami. Soy Catherine Gomez, especialista en propiedades en South Florida. ¿Cuándo podemos hablar?',
+  'Hola! Soy Catherine Gomez, agente de bienes raíces en Miami. Vi que estás buscando casa — te puedo guiar en todo el proceso sin costo. ¿Tienes un momento?',
+  '¡Hola! Vi tu interés en propiedades en Florida. Soy Catherine Gomez P.A. y me especializo en ayudar a familias latinas a comprar su primera casa en Miami. ¿Te puedo ayudar?',
+];
+const ENGLISH_DMS = [
+  "Hi! I noticed you're looking to buy in Miami. I'm Catherine Gomez, a real estate specialist in South Florida. I'd love to help — when's a good time to chat?",
+  "Hey! Saw your post about buying in Florida. I'm Catherine Gomez, a realtor specializing in South Florida properties. Happy to answer questions — no pressure at all!",
+];
+const SPANISH_SRC = new Set(['instagram_hashtags','instagram_comments','facebook_groups','tiktok_comments']);
+
+function dm(source, name) {
+  const pool = SPANISH_SRC.has(source) ? SPANISH_DMS : ENGLISH_DMS;
+  const h = (name||'').split('').reduce((a,c)=>a+c.charCodeAt(0),0);
+  return pool[h % pool.length];
+}
+
+function ago(ts) {
+  if (!ts) return '';
+  const s = (Date.now() - new Date(ts.includes('T') ? ts : ts + 'Z').getTime()) / 1000;
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return Math.floor(s/60)   + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return           Math.floor(s/86400)     + 'd ago';
+}
+
+function snippet(lead) {
+  try {
+    const r = typeof lead.raw_data === 'string' ? JSON.parse(lead.raw_data) : (lead.raw_data || {});
+    return (r.text || r.caption || r.postText || r.title || r.selftext || '').slice(0, 200);
+  } catch { return ''; }
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function renderLeads(leads) {
+  const feed = document.getElementById('feed');
+  if (!leads || !leads.length) {
+    feed.innerHTML = '<div class="empty">No leads yet — run a scan to get started.</div>';
+    return;
+  }
+  feed.innerHTML = leads.map(l => {
+    const score    = l.score || 'NEW';
+    const platform = PLATFORM[l.source] || l.source || 'Unknown';
+    const snip     = snippet(l);
+    const msg      = dm(l.source, l.name);
+    const url      = l.property_url || '';
+    const cls      = score.toLowerCase();
+    const safemsg  = msg.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+    return `
+      <div class="card ${cls}">
+        <div class="card-top">
+          <span class="score ${score}">${score}</span>
+          <span class="platform">${esc(platform)}</span>
+          <span class="lead-name">@${esc(l.name||'unknown')}</span>
+          <span class="lead-time">${ago(l.created_at)}</span>
+        </div>
+        ${snip ? `<div class="snippet">${esc(snip)}</div>` : ''}
+        <div class="dm-box" id="dm-${l.id}">${esc(msg)}</div>
+        <div class="actions">
+          ${url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">↗ Profile</a>` : ''}
+          <button class="btn" onclick="toggleDM(${l.id})">💬 DM</button>
+          <button class="btn" id="cp-${l.id}" onclick="copyDM(${l.id},'${safemsg}')">📋 Copy DM</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleDM(id) {
+  document.getElementById('dm-'+id).classList.toggle('open');
+}
+
+function copyDM(id, msg) {
+  navigator.clipboard.writeText(msg).then(() => {
+    const b = document.getElementById('cp-'+id);
+    b.textContent = '✓ Copied';
+    b.classList.add('copied');
+    setTimeout(() => { b.textContent = '📋 Copy DM'; b.classList.remove('copied'); }, 2000);
+  });
+}
+
+async function load() {
+  try {
+    const [d, s] = await Promise.all([fetch('/api/dashboard'), fetch('/status')]);
+    const dash   = await d.json();
+    const status = await s.json();
+
+    document.getElementById('s-total').textContent = dash.stats.total ?? '—';
+    document.getElementById('s-hot').textContent   = dash.stats.hot   ?? '—';
+    document.getElementById('s-warm').textContent  = dash.stats.warm  ?? '—';
+    document.getElementById('s-cold').textContent  = dash.stats.cold  ?? '—';
+
+    const job     = status.job_status || {};
+    const running = job.status === 'running';
+
+    document.getElementById('dot').className       = 'dot' + (running ? ' running' : '');
+    document.getElementById('status-txt').textContent = running ? 'Scanning…' : 'Idle';
+    document.getElementById('last-run').textContent   =
+      job.last_run ? 'Last scan: ' + new Date(job.last_run).toLocaleString() : 'Last scan: never';
+
+    const btn = document.getElementById('scan-btn');
+    btn.disabled  = running;
+    btn.innerHTML = running ? '<span class="spin"></span> Scanning…' : 'Start Scan';
+
+    const sources = job.sources || {};
+    document.getElementById('badges').innerHTML = Object.entries(sources)
+      .map(([k,v]) => `<span class="badge">${PLATFORM[k]||k} <b>${v}</b></span>`)
+      .join('');
+
+    renderLeads(dash.leads);
+    document.getElementById('footer').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+  } catch(e) { console.error('load error', e); }
+}
+
+async function startScan() {
+  const btn = document.getElementById('scan-btn');
+  btn.disabled  = true;
+  btn.innerHTML = '<span class="spin"></span> Starting…';
+  try {
+    await fetch('/scan/now', { method: 'POST' });
+    setTimeout(load, 1000);
+  } catch(e) {
+    console.error(e);
+    btn.disabled  = false;
+    btn.innerHTML = 'Start Scan';
+  }
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import asyncio
 import os
 from datetime import datetime
 from fastapi import FastAPI, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import uvicorn
@@ -239,14 +240,24 @@ async def shutdown_event():
     print("[+] System shutdown complete")
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
+    with open("dashboard.html", encoding="utf-8") as f:
+        return f.read()
+
+
+@app.get("/api/dashboard")
+async def api_dashboard():
     return {
-        "status": "RELIX Lead Generation System",
-        "version": "2.0.0",
-        "job_status": job_status,
-        "timestamp": datetime.now().isoformat(),
+        "stats": db.get_stats(),
+        "leads": db.get_leads_with_scores(limit=200),
     }
+
+
+@app.post("/scan/now")
+async def scan_now(background_tasks: BackgroundTasks):
+    background_tasks.add_task(scrape_leads_job)
+    return {"status": "triggered", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/status")

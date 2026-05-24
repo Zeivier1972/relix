@@ -221,14 +221,45 @@ class LeadDatabase:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
         cursor.execute("""
-            SELECT * FROM leads 
-            ORDER BY created_at DESC 
+            SELECT * FROM leads
+            ORDER BY created_at DESC
             LIMIT ?
         """, (limit,))
-        
+
         rows = cursor.fetchall()
         conn.close()
-        
+
+        return [dict(row) for row in rows]
+
+    def get_stats(self) -> Dict[str, int]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                COUNT(DISTINCT l.id)                                            AS total,
+                COUNT(DISTINCT CASE WHEN q.score = 'HOT'  THEN l.id END)       AS hot,
+                COUNT(DISTINCT CASE WHEN q.score = 'WARM' THEN l.id END)       AS warm,
+                COUNT(DISTINCT CASE WHEN q.score = 'COLD' THEN l.id END)       AS cold
+            FROM leads l
+            LEFT JOIN qualifications q ON l.id = q.lead_id
+        """)
+        row = cursor.fetchone()
+        conn.close()
+        return {"total": row[0], "hot": row[1], "warm": row[2], "cold": row[3]}
+
+    def get_leads_with_scores(self, limit: int = 200) -> List[Dict[str, Any]]:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT l.*, q.score
+            FROM leads l
+            LEFT JOIN qualifications q ON l.id = q.lead_id
+            ORDER BY l.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        conn.close()
         return [dict(row) for row in rows]
