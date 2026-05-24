@@ -551,6 +551,69 @@
     }
     .filter-btn.active { background: var(--tiffany); color: white; border-color: var(--tiffany); }
     .filter-btn:hover:not(.active) { border-color: var(--tiffany); color: var(--tiffany); }
+
+    /* ── Competitor Intel tab ────────────────────── */
+    .intel-card {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--tiffany);
+      margin-bottom: 10px;
+      transition: box-shadow .15s;
+    }
+    .intel-card:hover { box-shadow: var(--sh-md); }
+
+    .intel-rank {
+      display: inline-block;
+      width: 26px; height: 26px; line-height: 26px;
+      border-radius: 50%; text-align: center;
+      background: var(--tiffany); color: white;
+      font-size: .75rem; font-weight: 800;
+      flex-shrink: 0;
+    }
+    .intel-rank.gold   { background: #d97706; }
+    .intel-rank.silver { background: #64748b; }
+    .intel-rank.bronze { background: #92400e; }
+
+    .ad-copy-box {
+      background: #f8fffe;
+      border: 1px solid #b2eeec;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: .78rem; color: #1e3a39;
+      line-height: 1.6; margin: 8px 0;
+      white-space: pre-wrap;
+      display: none;
+    }
+    .ad-copy-box.open { display: block; }
+
+    .running-bar {
+      height: 6px; border-radius: 3px;
+      background: var(--border); overflow: hidden;
+      margin: 6px 0;
+    }
+    .running-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, var(--tiffany), var(--tiffany-dark));
+      transition: width .4s;
+    }
+
+    .buyer-lead-row {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 12px 14px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--hot);
+      margin-bottom: 8px;
+      font-size: .82rem;
+    }
+    .buyer-lead-row .comment-txt {
+      font-size: .76rem; color: var(--muted);
+      margin: 4px 0 8px; font-style: italic; line-height: 1.5;
+    }
   </style>
 </head>
 <body>
@@ -565,6 +628,7 @@
   <button class="tab-btn" onclick="switchTab('dm')">💬 DM Manager</button>
   <button class="tab-btn" onclick="switchTab('reddit')">🟠 Reddit Leads</button>
   <button class="tab-btn" onclick="switchTab('listings')">🏠 Listings</button>
+  <button class="tab-btn" onclick="switchTab('intel')">🕵️ Competitor Intel</button>
 </div>
 
 <!-- ══════════════════ LEADS TAB ══════════════════ -->
@@ -711,6 +775,49 @@
 
 </div>
 </div><!-- /tab-reddit -->
+
+<!-- ══════════════════ COMPETITOR INTEL TAB ══════════════════ -->
+<div class="tab-panel" id="tab-intel">
+<div class="container">
+
+  <div class="listing-stats" style="margin-top:16px;">
+    <div class="stat total"><div class="lbl">Total Ads Found</div><div class="val" id="ci-total-ads" style="color:var(--tiffany);">—</div></div>
+    <div class="stat"      ><div class="lbl">Unique Advertisers</div><div class="val" id="ci-advertisers">—</div></div>
+    <div class="stat hot"  ><div class="lbl">Buyer Leads</div><div class="val" id="ci-buyer-leads">—</div></div>
+    <div class="stat warm" ><div class="lbl">Queued for DM</div><div class="val" id="ci-dm-queued">—</div></div>
+  </div>
+
+  <div class="feed-hdr" style="margin-top:4px;">
+    <h2>Top 10 Advertisers in Your Market</h2>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-scan" style="padding:8px 16px;font-size:.8rem;" onclick="triggerFbAdsScan()">🔄 Scan Ads</button>
+      <button class="btn-refresh" onclick="loadIntel()">↻ Refresh</button>
+    </div>
+  </div>
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:14px;">
+    Ads running longest = proven messaging. Add <code>FACEBOOK_ACCESS_TOKEN</code> to Railway for full data.
+    Without it, the web fallback provides partial results.
+  </p>
+
+  <div id="intel-advertisers">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="feed-hdr" style="margin-top:20px;">
+    <h2>Buyer Leads from Ad Comments</h2>
+  </div>
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:12px;">
+    People who commented buyer-intent phrases on competitor ads. Instagram handles auto-queued for DM.
+  </p>
+
+  <div id="intel-buyer-leads">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="footer" id="intel-footer"></div>
+
+</div>
+</div><!-- /tab-intel -->
 
 <!-- ══════════════════ LISTINGS TAB ══════════════════ -->
 <div class="tab-panel" id="tab-listings">
@@ -915,6 +1022,7 @@ function switchTab(name) {
   if (name === 'dm')       loadDMStatus();
   if (name === 'reddit')   loadRedditLeads();
   if (name === 'listings') loadListings();
+  if (name === 'intel')    loadIntel();
 }
 
 // ── Reddit Leads ────────────────────────────────────────────────────────────
@@ -1186,6 +1294,110 @@ async function toggleAutoDM() {
     renderAutoDMBar({ enabled: data.auto_dm_enabled, ...data });
   } catch(e) { console.error('toggle error', e); }
   finally { btn.disabled = false; }
+}
+
+// ── Competitor Intel tab ───────────────────────────────────────────────────
+
+function renderAdvertiserCard(adv, rank) {
+  const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
+  const maxDays   = 365;
+  const barWidth  = Math.min(100, Math.round((adv.max_days / maxDays) * 100));
+  const spend     = adv.total_spend_lo > 0 ? `$${adv.total_spend_lo.toLocaleString()}+ est. spend` : '';
+  const copyId    = `adcopy-${rank}`;
+
+  return `
+    <div class="intel-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span class="intel-rank ${rankClass}">${rank}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:.92rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${esc(adv.page_name)}
+          </div>
+          <div style="font-size:.72rem;color:var(--muted);">
+            ${adv.ad_count} ad${adv.ad_count !== 1 ? 's' : ''} found
+            ${spend ? ' · ' + spend : ''}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div style="font-size:1.3rem;font-weight:800;color:var(--tiffany);">${adv.max_days}</div>
+          <div style="font-size:.65rem;color:var(--muted);font-weight:600;text-transform:uppercase;">days running</div>
+        </div>
+      </div>
+      <div class="running-bar">
+        <div class="running-bar-fill" style="width:${barWidth}%"></div>
+      </div>
+      <div class="actions" style="margin-top:8px;">
+        ${adv.page_url ? `<a class="btn" href="${esc(adv.page_url)}" target="_blank" rel="noopener">↗ FB Page</a>` : ''}
+        ${adv.top_ad_body || adv.top_ad_headline ? `
+          <button class="btn" onclick="document.getElementById('${copyId}').classList.toggle('open')">
+            💡 View Top Ad Copy
+          </button>` : ''}
+      </div>
+      ${(adv.top_ad_body || adv.top_ad_headline) ? `
+        <div class="ad-copy-box" id="${copyId}">
+          ${adv.top_ad_headline ? `<strong>${esc(adv.top_ad_headline)}</strong>\n\n` : ''}${esc(adv.top_ad_body || '')}
+        </div>` : ''}
+    </div>`;
+}
+
+function renderBuyerLeadRow(lead) {
+  const hasIG = lead.instagram_handle;
+  return `
+    <div class="buyer-lead-row">
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px;">
+        <span class="score HOT">HOT</span>
+        <span class="platform">${lead.language === 'spanish' ? '🇨🇴 Spanish' : '🇺🇸 English'}</span>
+        <span style="font-weight:600;">${esc(lead.profile_name || 'Unknown')}</span>
+        ${hasIG ? `<span style="color:var(--tiffany-dark);font-size:.75rem;">📸 @${esc(lead.instagram_handle)}</span>` : ''}
+        ${lead.dm_queued ? `<span class="status-chip yes">DM Queued ✓</span>` : '<span class="status-chip no">No IG Handle</span>'}
+        <span class="lead-time">${ago(lead.created_at)}</span>
+      </div>
+      <div class="comment-txt">"${esc((lead.comment_text || '').slice(0, 200))}"</div>
+      <div class="listing-actions">
+        ${lead.profile_url && !lead.profile_url.includes('snapshot')
+          ? `<a class="btn" href="${esc(lead.profile_url)}" target="_blank" rel="noopener">↗ Profile</a>`
+          : ''}
+      </div>
+    </div>`;
+}
+
+async function loadIntel() {
+  try {
+    const res  = await fetch('/api/fb-ads?limit=200');
+    const data = await res.json();
+
+    const stats = data.stats || {};
+    document.getElementById('ci-total-ads').textContent   = stats.total_ads ?? '—';
+    document.getElementById('ci-advertisers').textContent = stats.unique_advertisers ?? '—';
+    document.getElementById('ci-buyer-leads').textContent = stats.total_leads ?? '—';
+    document.getElementById('ci-dm-queued').textContent   = stats.dm_queued ?? '—';
+
+    const top = data.top_advertisers || [];
+    const advEl = document.getElementById('intel-advertisers');
+    if (!top.length) {
+      advEl.innerHTML = '<div class="empty">No competitor ads yet — click Scan Ads to start.</div>';
+    } else {
+      advEl.innerHTML = top.map((adv, i) => renderAdvertiserCard(adv, i + 1)).join('');
+    }
+
+    const leads = data.buyer_leads || [];
+    const leadsEl = document.getElementById('intel-buyer-leads');
+    if (!leads.length) {
+      leadsEl.innerHTML = '<div class="empty">No buyer leads found yet — more comments become visible over time.</div>';
+    } else {
+      leadsEl.innerHTML = leads.map(renderBuyerLeadRow).join('');
+    }
+
+    document.getElementById('intel-footer').textContent =
+      `${top.length} advertisers · ${leads.length} buyer leads · Updated ${new Date().toLocaleTimeString()}`;
+  } catch(e) { console.error('intel error', e); }
+}
+
+async function triggerFbAdsScan() {
+  try {
+    await fetch('/scan/fb-ads', { method: 'POST' });
+    alert('Facebook Ads Library scan triggered — results appear in 5-10 minutes.');
+  } catch(e) { console.error(e); }
 }
 
 // ── Listings tab ───────────────────────────────────────────────────────────

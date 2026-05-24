@@ -33,6 +33,7 @@ from scrapers.preforeclosure_scraper import PreForeclosureScraper
 from scrapers.public_records_scraper import PublicRecordsScraper
 from scrapers.sunbiz_scraper import SunbizScraper
 from scrapers.new_construction_scraper import NewConstructionScraper
+from scrapers.facebook_ads_scraper import FacebookAdsLibraryScraper, top_advertisers
 
 PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
@@ -430,6 +431,63 @@ async def _save_and_process_property_leads(leads: list, source_tag: str) -> int:
     return saved
 
 
+# ── Facebook Ads Library job ───────────────────────────────────────────────
+
+async def run_fb_ads_job():
+    """Every 6 hours — competitor intel + buyer lead harvesting from FB Ad Library."""
+    print(f"\n[{datetime.now()}] Running Facebook Ads Library scraper...")
+    s = FacebookAdsLibraryScraper()
+    try:
+        result = await s.scrape_all()
+        ads   = result.get("ads", [])
+        leads = result.get("leads", [])
+
+        # Save competitor ads
+        saved_ads = 0
+        for ad in ads:
+            if db.save_fb_ad(ad):
+                saved_ads += 1
+
+        # Save buyer leads + queue Instagram handles for auto-DM
+        saved_leads = 0
+        for lead in leads:
+            lead_db_id = db.save_fb_ad_lead(lead)
+            if not lead_db_id:
+                continue
+            saved_leads += 1
+            ig = lead.get("instagram_handle")
+            if ig:
+                # Add to phantom DM queue using the existing leads table
+                new_id = db.add_lead(
+                    name=ig,
+                    source="facebook_ads_comment",
+                    raw_data={"comment": lead.get("comment_text", ""), "ad_id": lead.get("ad_id")},
+                )
+                if new_id:
+                    db.add_to_dm_queue(
+                        lead_id=new_id,
+                        ig_username=ig,
+                        source="facebook_ads_comment",
+                        score="HOT",
+                    )
+                    db.mark_fb_lead_dm_queued(lead_db_id, new_id)
+                    print(f"[FBAds] Queued IG DM: @{ig}")
+            else:
+                # Save as WARM Facebook lead for manual follow-up
+                db.add_lead(
+                    name=lead.get("profile_name", "unknown"),
+                    property_url=lead.get("profile_url"),
+                    source="facebook_ads_comment",
+                    raw_data={"comment": lead.get("comment_text", ""), "ad_id": lead.get("ad_id")},
+                )
+
+        print(f"[FBAds] Saved {saved_ads} ads | {saved_leads} buyer leads")
+    except Exception as e:
+        print(f"[FBAds] Job error: {e}")
+    finally:
+        await s.close()
+
+
 # ── Auto-DM queue processor job ────────────────────────────────────────────
 
 async def dm_queue_processor_job():
@@ -524,6 +582,10 @@ def schedule_jobs():
                       id="tier1_interval", name="Tier 1 — High Intent (6h)")
     scheduler.add_job(scrape_tier1_job,
                       id="tier1_init", name="Tier 1 — Initial Run")
+
+    # Facebook Ads Library: every 6 hours (offset 30min from Tier1)
+    scheduler.add_job(run_fb_ads_job, IntervalTrigger(hours=6, start_date=datetime.now().replace(minute=30)),
+                      id="fb_ads", name="Facebook Ads Library (6h)")
 
     # Tier 2: every 12 hours
     scheduler.add_job(scrape_tier2_job, IntervalTrigger(hours=12),
@@ -879,6 +941,26 @@ async def scan_listings(background_tasks: BackgroundTasks):
 async def scan_preforeclosure(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_preforeclosure_job)
     return {"status": "Pre-foreclosure scraper triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/scan/fb-ads")
+async def scan_fb_ads(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_fb_ads_job)
+    return {"status": "Facebook Ads Library scan triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/fb-ads")
+async def get_fb_ads(limit: int = 200):
+    ads   = db.get_fb_ads(limit=limit)
+    leads = db.get_fb_ad_leads(limit=100)
+    stats = db.get_fb_stats()
+    top10 = top_advertisers(ads, n=10)
+    return {
+        "stats":            stats,
+        "top_advertisers":  top10,
+        "ads":              ads,
+        "buyer_leads":      leads,
+    }
 
 
 if __name__ == "__main__":

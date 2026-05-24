@@ -121,6 +121,48 @@ class LeadDatabase:
         """)
 
         cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS fb_ads (
+                id {_PK},
+                ad_id TEXT UNIQUE,
+                page_name TEXT,
+                page_id TEXT,
+                ad_body TEXT,
+                ad_headline TEXT,
+                ad_caption TEXT,
+                ad_description TEXT,
+                ad_snapshot_url TEXT,
+                page_url TEXT,
+                start_date TEXT,
+                days_running INTEGER DEFAULT 0,
+                spend_lower INTEGER DEFAULT 0,
+                spend_upper INTEGER DEFAULT 0,
+                impressions_lower INTEGER DEFAULT 0,
+                impressions_upper INTEGER DEFAULT 0,
+                keyword_matched TEXT,
+                commenter_count INTEGER DEFAULT 0,
+                source TEXT DEFAULT 'facebook_ads_library',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS fb_ad_leads (
+                id {_PK},
+                ad_id TEXT,
+                profile_name TEXT,
+                profile_url TEXT,
+                comment_text TEXT,
+                language TEXT DEFAULT 'unknown',
+                score TEXT DEFAULT 'HOT',
+                instagram_handle TEXT,
+                dm_queued INTEGER DEFAULT 0,
+                lead_db_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(profile_url, ad_id)
+            )
+        """)
+
+        cur.execute(f"""
             CREATE TABLE IF NOT EXISTS property_leads (
                 id {_PK},
                 address TEXT NOT NULL,
@@ -815,3 +857,164 @@ class LeadDatabase:
         cur.close()
         conn.close()
         return row["cnt"] if row else 0
+
+    # ── Facebook Ads ──────────────────────────────────────────────────────────
+
+    def save_fb_ad(self, ad: Dict[str, Any]) -> Optional[int]:
+        """Upsert a competitor ad record. Returns id or None if duplicate."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        ad_id = ad.get("ad_id") or ""
+        try:
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO fb_ads
+                        (ad_id, page_name, page_id, ad_body, ad_headline, ad_caption,
+                         ad_description, ad_snapshot_url, page_url, start_date,
+                         days_running, spend_lower, spend_upper, impressions_lower,
+                         impressions_upper, keyword_matched, source)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (ad_id) DO UPDATE SET
+                        days_running=EXCLUDED.days_running,
+                        spend_lower=EXCLUDED.spend_lower,
+                        spend_upper=EXCLUDED.spend_upper
+                    RETURNING id
+                """, (
+                    ad_id, ad.get("page_name"), ad.get("page_id"),
+                    ad.get("ad_body"), ad.get("ad_headline"), ad.get("ad_caption"),
+                    ad.get("ad_description"), ad.get("ad_snapshot_url"), ad.get("page_url"),
+                    ad.get("start_date"), ad.get("days_running", 0),
+                    ad.get("spend_lower", 0), ad.get("spend_upper", 0),
+                    ad.get("impressions_lower", 0), ad.get("impressions_upper", 0),
+                    ad.get("keyword_matched"), ad.get("source", "facebook_ads_library"),
+                ))
+                row = cur.fetchone()
+                result_id = row["id"] if row else None
+            else:
+                cur.execute("""
+                    INSERT OR REPLACE INTO fb_ads
+                        (ad_id, page_name, page_id, ad_body, ad_headline, ad_caption,
+                         ad_description, ad_snapshot_url, page_url, start_date,
+                         days_running, spend_lower, spend_upper, impressions_lower,
+                         impressions_upper, keyword_matched, source)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    ad_id, ad.get("page_name"), ad.get("page_id"),
+                    ad.get("ad_body"), ad.get("ad_headline"), ad.get("ad_caption"),
+                    ad.get("ad_description"), ad.get("ad_snapshot_url"), ad.get("page_url"),
+                    ad.get("start_date"), ad.get("days_running", 0),
+                    ad.get("spend_lower", 0), ad.get("spend_upper", 0),
+                    ad.get("impressions_lower", 0), ad.get("impressions_upper", 0),
+                    ad.get("keyword_matched"), ad.get("source", "facebook_ads_library"),
+                ))
+                result_id = cur.lastrowid
+            conn.commit()
+        except _IntegrityError:
+            result_id = None
+        finally:
+            cur.close()
+            conn.close()
+        return result_id
+
+    def save_fb_ad_lead(self, lead: Dict[str, Any]) -> Optional[int]:
+        """Save a buyer-intent lead found in a FB ad. Returns id or None."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        try:
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO fb_ad_leads
+                        (ad_id, profile_name, profile_url, comment_text,
+                         language, score, instagram_handle)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (profile_url, ad_id) DO NOTHING
+                    RETURNING id
+                """, (
+                    lead.get("ad_id"), lead.get("profile_name"),
+                    lead.get("profile_url"), lead.get("comment_text"),
+                    lead.get("language", "unknown"), lead.get("score", "HOT"),
+                    lead.get("instagram_handle"),
+                ))
+                row = cur.fetchone()
+                result_id = row["id"] if row else None
+            else:
+                cur.execute("""
+                    INSERT OR IGNORE INTO fb_ad_leads
+                        (ad_id, profile_name, profile_url, comment_text,
+                         language, score, instagram_handle)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (
+                    lead.get("ad_id"), lead.get("profile_name"),
+                    lead.get("profile_url"), lead.get("comment_text"),
+                    lead.get("language", "unknown"), lead.get("score", "HOT"),
+                    lead.get("instagram_handle"),
+                ))
+                result_id = cur.lastrowid if cur.rowcount > 0 else None
+            conn.commit()
+        except _IntegrityError:
+            result_id = None
+        finally:
+            cur.close()
+            conn.close()
+        return result_id
+
+    def mark_fb_lead_dm_queued(self, lead_id: int, lead_db_id: Optional[int] = None):
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"UPDATE fb_ad_leads SET dm_queued=1, lead_db_id={PH} WHERE id={PH}",
+            (lead_db_id, lead_id),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def get_fb_ads(self, limit: int = 200) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            SELECT * FROM fb_ads
+            ORDER BY days_running DESC, created_at DESC
+            LIMIT {PH}
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_fb_ad_leads(self, limit: int = 100) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            SELECT * FROM fb_ad_leads
+            ORDER BY created_at DESC
+            LIMIT {PH}
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_fb_stats(self) -> Dict[str, Any]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total_ads,
+                COUNT(DISTINCT page_name) AS unique_advertisers,
+                MAX(days_running) AS longest_running,
+                COUNT(CASE WHEN spend_lower > 0 THEN 1 END) AS ads_with_spend
+            FROM fb_ads
+        """)
+        ad_stats = dict(cur.fetchone() or {})
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total_leads,
+                COUNT(CASE WHEN instagram_handle IS NOT NULL THEN 1 END) AS with_ig,
+                COUNT(CASE WHEN dm_queued=1 THEN 1 END) AS dm_queued
+            FROM fb_ad_leads
+        """)
+        lead_stats = dict(cur.fetchone() or {})
+        cur.close()
+        conn.close()
+        return {**ad_stats, **lead_stats}
