@@ -150,15 +150,17 @@ def get_pending_dm_leads() -> List[Dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
-        SELECT l.id, l.name, l.source, l.property_url, q.score
+        SELECT l.id, l.name, l.source, l.property_url, l.created_at, q.score,
+               CASE q.score WHEN 'HOT' THEN 'DM today' ELSE 'DM within 48 hours' END AS dm_urgency
         FROM leads l
         JOIN qualifications q ON l.id = q.lead_id
-        WHERE l.source IN ('instagram_hashtags', 'instagram_comments')
+        WHERE l.source IN ('instagram_hashtags', 'instagram_comments', 'instagram')
           AND q.score IN ('HOT', 'WARM')
           AND l.name NOT IN (
               SELECT instagram_username FROM dm_log WHERE status = 'sent'
           )
-        ORDER BY q.score DESC, l.created_at DESC
+        ORDER BY CASE q.score WHEN 'HOT' THEN 1 WHEN 'WARM' THEN 2 ELSE 3 END,
+                 l.created_at DESC
         LIMIT 50
     """).fetchall()
     conn.close()
@@ -460,6 +462,10 @@ class InstagramDMBot:
             print("[Phantom] No pending Instagram leads to DM.")
             return
 
+        hot_count = sum(1 for l in leads if l["score"] == "HOT")
+        warm_count = sum(1 for l in leads if l["score"] == "WARM")
+        print(f"[Phantom] Queue: {hot_count} HOT (DM today), {warm_count} WARM (DM within 48h)")
+
         remaining = MAX_DMS_PER_DAY - dms_today
         batch = leads[:remaining]
         print(
@@ -485,11 +491,13 @@ class InstagramDMBot:
 
                 ig_username = lead["name"]
                 source = lead.get("source", "")
+                urgency = lead.get("dm_urgency", "")
 
                 if _already_dmed(ig_username):
                     print(f"[Phantom] Already DMed @{ig_username}, skipping")
                     continue
 
+                print(f"[Phantom] [{lead['score']} — {urgency}] @{ig_username}")
                 message = _build_message(ig_username, source)
                 await self.send_dm(ig_username, message,
                                    lead_id=lead["id"], source=source)
