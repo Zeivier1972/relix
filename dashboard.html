@@ -460,6 +460,97 @@
       grid-template-columns: repeat(3, 1fr);
       gap: 10px; margin: 16px 0;
     }
+
+    /* ── Listings tab ────────────────────────── */
+    .listing-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px; margin: 16px 0;
+    }
+    @media (min-width: 560px) { .listing-stats { grid-template-columns: repeat(4, 1fr); } }
+
+    .listing-card {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 14px 16px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--border);
+      margin-bottom: 10px;
+      transition: box-shadow .15s;
+    }
+    .listing-card:hover  { box-shadow: var(--sh-md); }
+    .listing-card.hot    { border-left-color: var(--hot); }
+    .listing-card.warm   { border-left-color: var(--warm); }
+
+    .listing-address {
+      font-size: .88rem; font-weight: 600;
+      margin: 4px 0 6px; line-height: 1.35;
+    }
+    .listing-meta {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      font-size: .74rem; color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .listing-meta span { white-space: nowrap; }
+    .listing-meta .price { color: var(--text); font-weight: 700; }
+
+    .lead-type-badge {
+      font-size: .62rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .lead-type-badge.fsbo            { background: #fef3c7; color: #92400e; }
+    .lead-type-badge.price_drop      { background: #fff7ed; color: #c2410c; }
+    .lead-type-badge.pre_foreclosure { background: #fef2f2; color: var(--hot); }
+    .lead-type-badge.llc_purchase    { background: #eff6ff; color: #1d4ed8; }
+    .lead-type-badge.cash_buyer      { background: #f0fdf4; color: #15803d; }
+    .lead-type-badge.new_construction { background: #f0fdf9; color: var(--tiffany-dark); }
+    .lead-type-badge.back_on_market  { background: #fdf4ff; color: #7e22ce; }
+    .lead-type-badge.expired         { background: #f8fafc; color: var(--cold); }
+
+    .contact-row {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .77rem; margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .contact-row .owner { font-weight: 600; }
+    .contact-row .phone { color: var(--tiffany-dark); }
+
+    .listing-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+
+    .btn-lofty {
+      background: var(--tiffany);
+      color: white; border: none;
+      border-radius: 6px; padding: 6px 12px;
+      font-size: .73rem; font-weight: 700;
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 4px;
+      transition: background .15s;
+    }
+    .btn-lofty:hover    { background: var(--tiffany-dark); }
+    .btn-lofty:disabled { background: var(--muted); cursor: not-allowed; }
+    .btn-lofty.done     { background: #16a34a; }
+
+    .status-chip {
+      font-size: .62rem; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+    }
+    .status-chip.yes { background: #f0fdf4; color: #16a34a; }
+    .status-chip.no  { background: #f8fafc; color: var(--cold); }
+
+    .listing-filter-bar {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      margin-bottom: 12px; align-items: center;
+    }
+    .filter-btn {
+      font-size: .74rem; font-weight: 600;
+      padding: 5px 12px; border-radius: 20px;
+      border: 1px solid var(--border);
+      background: white; color: var(--muted);
+      cursor: pointer; transition: all .15s;
+    }
+    .filter-btn.active { background: var(--tiffany); color: white; border-color: var(--tiffany); }
+    .filter-btn:hover:not(.active) { border-color: var(--tiffany); color: var(--tiffany); }
   </style>
 </head>
 <body>
@@ -473,6 +564,7 @@
   <button class="tab-btn active" onclick="switchTab('leads')">📊 Leads</button>
   <button class="tab-btn" onclick="switchTab('dm')">💬 DM Manager</button>
   <button class="tab-btn" onclick="switchTab('reddit')">🟠 Reddit Leads</button>
+  <button class="tab-btn" onclick="switchTab('listings')">🏠 Listings</button>
 </div>
 
 <!-- ══════════════════ LEADS TAB ══════════════════ -->
@@ -619,6 +711,51 @@
 
 </div>
 </div><!-- /tab-reddit -->
+
+<!-- ══════════════════ LISTINGS TAB ══════════════════ -->
+<div class="tab-panel" id="tab-listings">
+<div class="container">
+
+  <div class="listing-stats" style="margin-top:16px;" id="listing-stats-row">
+    <div class="stat total"><div class="lbl">Total Listings</div><div class="val" id="ls-total">—</div></div>
+    <div class="stat hot"  ><div class="lbl">🔥 HOT</div>        <div class="val" id="ls-hot">—</div></div>
+    <div class="stat warm" ><div class="lbl">☀️ WARM</div>       <div class="val" id="ls-warm">—</div></div>
+    <div class="stat"      ><div class="lbl">📲 In Lofty</div>   <div class="val" id="ls-lofty" style="color:var(--tiffany);">—</div></div>
+  </div>
+
+  <div class="listing-stats" id="listing-type-row">
+    <div class="stat"><div class="lbl">FSBO</div>            <div class="val" id="ls-fsbo" style="color:#92400e;">—</div></div>
+    <div class="stat"><div class="lbl">Pre-Foreclosure</div><div class="val" id="ls-prefc" style="color:var(--hot);">—</div></div>
+    <div class="stat"><div class="lbl">Cash/LLC Buyers</div><div class="val" id="ls-cash" style="color:#1d4ed8;">—</div></div>
+    <div class="stat"><div class="lbl">New Construction</div><div class="val" id="ls-newcon" style="color:var(--tiffany-dark);">—</div></div>
+  </div>
+
+  <div class="feed-hdr" style="margin-top:4px;">
+    <h2>Property Lead Feed</h2>
+    <div style="display:flex;gap:8px;">
+      <button class="btn-scan" style="padding:8px 16px;font-size:.8rem;" onclick="triggerListingScan()">🔄 Scan Now</button>
+      <button class="btn-refresh" onclick="loadListings()">↻ Refresh</button>
+    </div>
+  </div>
+
+  <div class="listing-filter-bar">
+    <span style="font-size:.75rem;font-weight:600;color:var(--muted);">Filter:</span>
+    <button class="filter-btn active" onclick="filterListings('all',this)">All</button>
+    <button class="filter-btn" onclick="filterListings('HOT',this)">🔥 HOT Only</button>
+    <button class="filter-btn" onclick="filterListings('FSBO',this)">FSBO</button>
+    <button class="filter-btn" onclick="filterListings('PRE_FORECLOSURE',this)">Pre-Foreclosure</button>
+    <button class="filter-btn" onclick="filterListings('CASH_BUYER',this)">Cash Buyers</button>
+    <button class="filter-btn" onclick="filterListings('NEW_CONSTRUCTION',this)">New Construction</button>
+  </div>
+
+  <div id="listings-feed">
+    <div class="empty">Loading…</div>
+  </div>
+
+  <div class="footer" id="listings-footer"></div>
+
+</div>
+</div><!-- /tab-listings -->
 
 <script>
 const PLATFORM = {
@@ -775,8 +912,9 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => {
     if (b.getAttribute('onclick') === `switchTab('${name}')`) b.classList.add('active');
   });
-  if (name === 'dm')     loadDMStatus();
-  if (name === 'reddit') loadRedditLeads();
+  if (name === 'dm')       loadDMStatus();
+  if (name === 'reddit')   loadRedditLeads();
+  if (name === 'listings') loadListings();
 }
 
 // ── Reddit Leads ────────────────────────────────────────────────────────────
@@ -1048,6 +1186,192 @@ async function toggleAutoDM() {
     renderAutoDMBar({ enabled: data.auto_dm_enabled, ...data });
   } catch(e) { console.error('toggle error', e); }
   finally { btn.disabled = false; }
+}
+
+// ── Listings tab ───────────────────────────────────────────────────────────
+
+let _allListings = [];
+let _listingFilter = 'all';
+
+const LEAD_TYPE_LABEL = {
+  FSBO:             'FSBO',
+  PRICE_DROP:       'Price Drop',
+  PRE_FORECLOSURE:  'Pre-Foreclosure',
+  LLC_PURCHASE:     'LLC Purchase',
+  CASH_BUYER:       'Cash Buyer',
+  NEW_CONSTRUCTION: 'New Construction',
+  BACK_ON_MARKET:   'Back on Market',
+  EXPIRED:          'Expired',
+};
+
+function fmtPrice(p) {
+  if (!p) return '';
+  return '$' + Number(p).toLocaleString();
+}
+
+function renderListingCard(p) {
+  const score   = p.score || 'WARM';
+  const cls     = score.toLowerCase();
+  const ltype   = (p.lead_type || '').toLowerCase().replace(/_/g, '_');
+  const ltypeLabel = LEAD_TYPE_LABEL[p.lead_type] || p.lead_type || '';
+  const hasPhone  = p.phone && p.phone.trim();
+  const hasLofty  = p.lofty_pushed;
+  const hasSms    = p.sms_sent;
+  const raw       = p.raw_data || {};
+  const builder   = raw.builder || '';
+  const community = raw.community || '';
+  const county    = raw.county || '';
+
+  const detail = [
+    p.listing_price ? fmtPrice(p.listing_price) : '',
+    p.days_on_market ? `${p.days_on_market} DOM` : '',
+    p.price_reduction_pct > 0 ? `${p.price_reduction_pct}% drop` : '',
+    builder || community || county || '',
+    raw.beds ? `${raw.beds}bd` : '',
+    raw.baths ? `${raw.baths}ba` : '',
+    raw.sqft ? `${Number(raw.sqft).toLocaleString()} sf` : '',
+  ].filter(Boolean);
+
+  const smsStatus = hasPhone
+    ? (hasSms ? `<span class="status-chip yes">SMS ✓</span>` : `<span class="status-chip no">SMS —</span>`)
+    : `<span class="status-chip no">No Phone</span>`;
+
+  const loftyStatus = hasLofty
+    ? `<span class="status-chip yes">Lofty ✓</span>`
+    : (p.owner_name && (p.phone || p.email))
+      ? `<span class="status-chip no">Not in Lofty</span>`
+      : `<span class="status-chip no">No Contact</span>`;
+
+  const canPushLofty = !hasLofty && p.owner_name && (p.phone || p.email);
+  const canSendSms   = !hasSms && hasPhone && score === 'HOT';
+
+  return `
+    <div class="listing-card ${cls}" id="lcard-${p.id}">
+      <div class="card-top" style="margin-bottom:6px;">
+        <span class="score ${score}">${score}</span>
+        <span class="lead-type-badge ${ltype}">${esc(ltypeLabel)}</span>
+        <span class="platform">${esc(p.source || '')}</span>
+        <span class="lead-time">${ago(p.created_at)}</span>
+      </div>
+      <div class="listing-address">${esc(p.address || '(address unavailable)')}</div>
+      <div class="listing-meta">
+        ${detail.map(d => `<span>${esc(d)}</span>`).join('')}
+      </div>
+      ${p.owner_name ? `
+        <div class="contact-row">
+          <span class="owner">👤 ${esc(p.owner_name)}</span>
+          ${hasPhone ? `<span class="phone">📞 ${esc(p.phone)}</span>` : ''}
+          ${p.email  ? `<span style="color:var(--muted);">✉️ ${esc(p.email)}</span>` : ''}
+        </div>` : ''}
+      <div class="listing-actions">
+        ${p.listing_url
+          ? `<a class="btn" href="${esc(p.listing_url)}" target="_blank" rel="noopener">↗ View</a>`
+          : ''}
+        ${hasPhone
+          ? `<a class="btn" href="tel:${esc(p.phone)}" style="color:#16a34a;">📞 Call</a>`
+          : ''}
+        ${canPushLofty ? `
+          <button class="btn-lofty" id="loftybtn-${p.id}" onclick="pushToLofty(${p.id}, this)">
+            ➕ Add to Lofty
+          </button>` : ''}
+        ${canSendSms ? `
+          <button class="btn" id="smsbtn-${p.id}" onclick="sendListingSMS(${p.id}, this)">
+            📱 Send SMS
+          </button>` : ''}
+        ${loftyStatus}
+        ${smsStatus}
+      </div>
+    </div>`;
+}
+
+function filterListings(filter, btn) {
+  _listingFilter = filter;
+  document.querySelectorAll('.listing-filter-bar .filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const filtered = filter === 'all'
+    ? _allListings
+    : filter === 'HOT'
+      ? _allListings.filter(p => p.score === 'HOT')
+      : _allListings.filter(p => p.lead_type === filter);
+
+  const feed = document.getElementById('listings-feed');
+  if (!filtered.length) {
+    feed.innerHTML = '<div class="empty">No listings match this filter.</div>';
+  } else {
+    feed.innerHTML = filtered.map(renderListingCard).join('');
+  }
+}
+
+function renderListingStats(stats) {
+  if (!stats) return;
+  document.getElementById('ls-total').textContent = stats.total ?? '—';
+  document.getElementById('ls-hot').textContent   = stats.hot ?? '—';
+  document.getElementById('ls-warm').textContent  = stats.warm ?? '—';
+  document.getElementById('ls-lofty').textContent = stats.in_lofty ?? '—';
+  document.getElementById('ls-fsbo').textContent  = stats.fsbo ?? '—';
+  document.getElementById('ls-prefc').textContent = stats.pre_foreclosure ?? '—';
+  document.getElementById('ls-cash').textContent  = stats.cash_buyers ?? '—';
+  document.getElementById('ls-newcon').textContent = stats.new_construction ?? '—';
+}
+
+async function loadListings() {
+  try {
+    const res  = await fetch('/api/property-leads?limit=300');
+    const data = await res.json();
+    _allListings = data.leads || [];
+    renderListingStats(data.stats);
+    filterListings(_listingFilter);
+    document.getElementById('listings-footer').textContent =
+      `${data.count} property leads · Updated ${new Date().toLocaleTimeString()}`;
+  } catch(e) { console.error('listings error', e); }
+}
+
+async function pushToLofty(leadId, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin-dark"></span>';
+  try {
+    const res  = await fetch(`/api/property-leads/${leadId}/push-to-lofty`, { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'pushed') {
+      btn.outerHTML = `<span class="status-chip yes">Lofty ✓</span>`;
+    } else {
+      btn.textContent = '❌ ' + (data.reason || 'Error');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+  }
+}
+
+async function sendListingSMS(leadId, btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin-dark"></span> Sending…';
+  try {
+    const res  = await fetch(`/api/property-leads/${leadId}/send-sms`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: 'spanish' }),
+    });
+    const data = await res.json();
+    if (data.status === 'sent') {
+      btn.outerHTML = `<span class="status-chip yes">SMS ✓</span>`;
+    } else {
+      btn.textContent = '⏭ ' + (data.reason || 'Skipped');
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+  }
+}
+
+async function triggerListingScan() {
+  try {
+    await fetch('/scan/listings', { method: 'POST' });
+    alert('Listing scan triggered — check back in a few minutes.');
+  } catch(e) { console.error(e); }
 }
 
 async function loadDMStatus() {

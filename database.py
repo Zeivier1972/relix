@@ -120,6 +120,43 @@ class LeadDatabase:
             )
         """)
 
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS property_leads (
+                id {_PK},
+                address TEXT NOT NULL,
+                city TEXT,
+                zip_code TEXT,
+                owner_name TEXT,
+                listing_price REAL DEFAULT 0,
+                days_on_market INTEGER DEFAULT 0,
+                price_reduction_pct REAL DEFAULT 0,
+                price_reduction_amt REAL DEFAULT 0,
+                phone TEXT,
+                email TEXT,
+                listing_url TEXT,
+                lead_type TEXT,
+                score TEXT,
+                source TEXT,
+                raw_data TEXT,
+                lofty_pushed INTEGER DEFAULT 0,
+                sms_sent INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(listing_url)
+            )
+        """)
+
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS sms_log (
+                id {_PK},
+                phone TEXT NOT NULL,
+                lead_type TEXT,
+                lead_source TEXT,
+                message TEXT,
+                status TEXT DEFAULT 'sent',
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
         cur.close()
         conn.close()
@@ -592,3 +629,189 @@ class LeadDatabase:
         cur.close()
         conn.close()
         return [dict(r) for r in rows]
+
+    # ── Property Leads ────────────────────────────────────────────────────────
+
+    def add_property_lead(self, lead: Dict[str, Any]) -> Optional[int]:
+        """Insert a property lead, skip if listing_url already exists."""
+        raw = lead.get("raw_data")
+        raw_json = json.dumps(raw) if raw else None
+        url = lead.get("listing_url") or ""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        try:
+            if USE_POSTGRES:
+                cur.execute("""
+                    INSERT INTO property_leads
+                        (address, city, zip_code, owner_name, listing_price,
+                         days_on_market, price_reduction_pct, price_reduction_amt,
+                         phone, email, listing_url, lead_type, score, source, raw_data)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (listing_url) DO NOTHING
+                    RETURNING id
+                """, (
+                    lead.get("address"), lead.get("city"), lead.get("zip_code"),
+                    lead.get("owner_name"), lead.get("listing_price", 0),
+                    lead.get("days_on_market", 0), lead.get("price_reduction_pct", 0),
+                    lead.get("price_reduction_amt", 0), lead.get("phone"),
+                    lead.get("email"), url, lead.get("lead_type"),
+                    lead.get("score"), lead.get("source"), raw_json,
+                ))
+                row = cur.fetchone()
+                lead_id = row["id"] if row else None
+            else:
+                cur.execute("""
+                    INSERT OR IGNORE INTO property_leads
+                        (address, city, zip_code, owner_name, listing_price,
+                         days_on_market, price_reduction_pct, price_reduction_amt,
+                         phone, email, listing_url, lead_type, score, source, raw_data)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, (
+                    lead.get("address"), lead.get("city"), lead.get("zip_code"),
+                    lead.get("owner_name"), lead.get("listing_price", 0),
+                    lead.get("days_on_market", 0), lead.get("price_reduction_pct", 0),
+                    lead.get("price_reduction_amt", 0), lead.get("phone"),
+                    lead.get("email"), url, lead.get("lead_type"),
+                    lead.get("score"), lead.get("source"), raw_json,
+                ))
+                lead_id = cur.lastrowid if cur.rowcount > 0 else None
+            conn.commit()
+        except _IntegrityError:
+            lead_id = None
+        finally:
+            cur.close()
+            conn.close()
+        return lead_id
+
+    def get_property_leads(self, score: Optional[str] = None,
+                           lead_type: Optional[str] = None,
+                           limit: int = 200) -> List[Dict[str, Any]]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        where = []
+        params = []
+        if score:
+            where.append(f"score = {PH}")
+            params.append(score)
+        if lead_type:
+            where.append(f"lead_type = {PH}")
+            params.append(lead_type)
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        params.append(limit)
+        cur.execute(f"""
+            SELECT * FROM property_leads
+            {clause}
+            ORDER BY score DESC, created_at DESC
+            LIMIT {PH}
+        """, params)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        result = []
+        for row in rows:
+            d = dict(row)
+            if d.get("raw_data") and isinstance(d["raw_data"], str):
+                try:
+                    d["raw_data"] = json.loads(d["raw_data"])
+                except Exception:
+                    d["raw_data"] = {}
+            result.append(d)
+        return result
+
+    def get_property_lead_stats(self) -> Dict[str, Any]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(CASE WHEN score='HOT' THEN 1 END) AS hot,
+                COUNT(CASE WHEN score='WARM' THEN 1 END) AS warm,
+                COUNT(CASE WHEN lofty_pushed=1 THEN 1 END) AS in_lofty,
+                COUNT(CASE WHEN sms_sent=1 THEN 1 END) AS sms_sent_count,
+                COUNT(CASE WHEN phone IS NOT NULL AND phone != '' THEN 1 END) AS has_phone,
+                COUNT(CASE WHEN lead_type='FSBO' THEN 1 END) AS fsbo,
+                COUNT(CASE WHEN lead_type='PRE_FORECLOSURE' THEN 1 END) AS pre_foreclosure,
+                COUNT(CASE WHEN lead_type='PRICE_DROP' THEN 1 END) AS price_drop,
+                COUNT(CASE WHEN lead_type='NEW_CONSTRUCTION' THEN 1 END) AS new_construction,
+                COUNT(CASE WHEN lead_type IN ('LLC_PURCHASE','CASH_BUYER') THEN 1 END) AS cash_buyers
+            FROM property_leads
+        """)
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else {}
+
+    def mark_property_lofty_pushed(self, lead_id: int):
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"UPDATE property_leads SET lofty_pushed=1 WHERE id={PH}", (lead_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def mark_property_sms_sent(self, lead_id: int):
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"UPDATE property_leads SET sms_sent=1 WHERE id={PH}", (lead_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def get_property_lead(self, lead_id: int) -> Optional[Dict[str, Any]]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"SELECT * FROM property_leads WHERE id={PH}", (lead_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return None
+        d = dict(row)
+        if d.get("raw_data") and isinstance(d["raw_data"], str):
+            try:
+                d["raw_data"] = json.loads(d["raw_data"])
+            except Exception:
+                d["raw_data"] = {}
+        return d
+
+    # ── SMS Log ───────────────────────────────────────────────────────────────
+
+    def check_sms_cooldown(self, phone: str, days: int = 30) -> bool:
+        """Return True if this phone was already texted within the cooldown window."""
+        if not phone:
+            return True
+        cutoff = datetime.now() - timedelta(days=days)
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"SELECT id FROM sms_log WHERE phone={PH} AND sent_at >= {PH} AND status='sent'",
+            (phone, cutoff),
+        )
+        found = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return found
+
+    def log_sms_sent(self, phone: str, lead_type: str, lead_source: str, message: str):
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"INSERT INTO sms_log (phone, lead_type, lead_source, message) VALUES ({PH},{PH},{PH},{PH})",
+            (phone, lead_type, lead_source, message),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def count_sms_today(self) -> int:
+        today = datetime.now().date()
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(
+            f"SELECT COUNT(*) AS cnt FROM sms_log WHERE sent_at >= {PH} AND status='sent'",
+            (today,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row["cnt"] if row else 0

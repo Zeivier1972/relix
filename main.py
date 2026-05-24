@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 from datetime import datetime
+
+import httpx
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -22,9 +24,19 @@ from pipeline.twilio_alert import TwilioWhatsAppAlerts
 from pipeline.lofty import LoftyCRMClient
 from pipeline.phantom import (run_dm_bot, get_dm_log, _count_dms_today,
                               send_dm_to_lead, build_dm_preview, process_dm_queue)
+from pipeline.lofty import push_directly_to_lofty
+from pipeline.twilio_alert import send_property_sms
+from scrapers.zillow_playwright import ZillowScraper
+from scrapers.realtor_playwright import RealtorScraper
+from scrapers.redfin_playwright import RedfinScraper
+from scrapers.preforeclosure_scraper import PreForeclosureScraper
+from scrapers.public_records_scraper import PublicRecordsScraper
+from scrapers.sunbiz_scraper import SunbizScraper
+from scrapers.new_construction_scraper import NewConstructionScraper
 
 PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "")
 
 # ── Tier 1 — Every 6 hours (highest buyer intent) ─────────────────────────
 FACEBOOK_TIER1 = [
@@ -357,6 +369,67 @@ async def scrape_tier3_job():
     )
 
 
+# ── Property lead helpers ──────────────────────────────────────────────────
+
+async def _send_n8n(lead: dict):
+    """Fire-and-forget N8N webhook with property lead data."""
+    if not N8N_WEBHOOK_URL:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(N8N_WEBHOOK_URL, json={
+                "name": lead.get("owner_name") or "",
+                "phone": lead.get("phone") or "",
+                "email": lead.get("email") or "",
+                "leadType": lead.get("lead_type") or "",
+                "score": lead.get("score") or "",
+                "source": lead.get("source") or "",
+                "propertyAddress": lead.get("address") or "",
+                "propertyPrice": lead.get("listing_price") or 0,
+                "daysOnMarket": lead.get("days_on_market") or 0,
+            })
+    except Exception as e:
+        print(f"[N8N] Webhook error: {e}")
+
+
+async def _process_property_lead(lead: dict, lead_id: int):
+    """
+    After a property lead is saved:
+    - If HOT or WARM and has name + (phone/email): push directly to Lofty
+    - If HOT and has phone: send property SMS (9am-7pm, 30-day cooldown, 50/day limit)
+    - Fire N8N webhook for any lead with contact info
+    """
+    score = lead.get("score", "")
+    phone = lead.get("phone") or ""
+    has_contact = bool((lead.get("owner_name") or lead.get("name")) and (phone or lead.get("email")))
+
+    if score in ("HOT", "WARM") and has_contact:
+        lead_with_id = {**lead, "id": lead_id}
+        result = await push_directly_to_lofty(lead_with_id)
+        if result:
+            db.mark_property_lofty_pushed(lead_id)
+
+        if score == "HOT" and phone:
+            await send_property_sms(lead_with_id, db=db, language="spanish")
+
+        if has_contact:
+            asyncio.create_task(_send_n8n(lead_with_id))
+
+
+async def _save_and_process_property_leads(leads: list, source_tag: str) -> int:
+    """Save property leads to DB and trigger Lofty/SMS/N8N for qualifying ones."""
+    saved = 0
+    for lead in leads:
+        try:
+            lead_id = db.add_property_lead(lead)
+            if lead_id:
+                saved += 1
+                await _process_property_lead(lead, lead_id)
+        except Exception as e:
+            print(f"[{source_tag}] Save error: {e}")
+    return saved
+
+
 # ── Auto-DM queue processor job ────────────────────────────────────────────
 
 async def dm_queue_processor_job():
@@ -364,6 +437,83 @@ async def dm_queue_processor_job():
     result = await process_dm_queue(auto_dm_enabled=auto_dm_enabled)
     if result["status"] not in ("no_due_items", "outside_hours", "disabled"):
         print(f"[AutoDM] Queue processor: {result}")
+
+
+# ── Property listing scraper jobs ─────────────────────────────────────────
+
+async def run_listing_scrapers():
+    """Daily 7am — Zillow, Realtor.com, Redfin."""
+    print(f"\n[{datetime.now()}] Running listing scrapers (Zillow/Realtor/Redfin)...")
+    for ScraperClass, tag in [
+        (ZillowScraper, "Zillow"),
+        (RealtorScraper, "Realtor"),
+        (RedfinScraper, "Redfin"),
+    ]:
+        s = ScraperClass()
+        try:
+            leads = await s.scrape_all()
+            saved = await _save_and_process_property_leads(leads, tag)
+            print(f"[{tag}] Saved {saved}/{len(leads)} new property leads")
+        except Exception as e:
+            print(f"[{tag}] Job error: {e}")
+        finally:
+            await s.close()
+
+
+async def run_preforeclosure_job():
+    """Monday 6am — county clerk Lis Pendens."""
+    print(f"\n[{datetime.now()}] Running pre-foreclosure scraper...")
+    s = PreForeclosureScraper()
+    try:
+        leads = await s.scrape_all()
+        saved = await _save_and_process_property_leads(leads, "PreForeclosure")
+        print(f"[PreForeclosure] Saved {saved}/{len(leads)} leads")
+    except Exception as e:
+        print(f"[PreForeclosure] Job error: {e}")
+    finally:
+        await s.close()
+
+
+async def run_public_records_job():
+    """Monday 6am — deed records for cash buyers and LLC purchases."""
+    print(f"\n[{datetime.now()}] Running public records scraper...")
+    s = PublicRecordsScraper()
+    try:
+        leads = await s.scrape_all()
+        saved = await _save_and_process_property_leads(leads, "PublicRecords")
+        print(f"[PublicRecords] Saved {saved}/{len(leads)} leads")
+    except Exception as e:
+        print(f"[PublicRecords] Job error: {e}")
+    finally:
+        await s.close()
+
+
+async def run_sunbiz_job():
+    """Monday 6am — new LLC registrations."""
+    print(f"\n[{datetime.now()}] Running Sunbiz LLC scraper...")
+    s = SunbizScraper()
+    try:
+        leads = await s.scrape_all()
+        saved = await _save_and_process_property_leads(leads, "Sunbiz")
+        print(f"[Sunbiz] Saved {saved}/{len(leads)} leads")
+    except Exception as e:
+        print(f"[Sunbiz] Job error: {e}")
+    finally:
+        await s.close()
+
+
+async def run_new_construction_job():
+    """Daily 8am — builder community listings."""
+    print(f"\n[{datetime.now()}] Running new construction scraper...")
+    s = NewConstructionScraper()
+    try:
+        leads = await s.scrape_all()
+        saved = await _save_and_process_property_leads(leads, "NewConstruction")
+        print(f"[NewConstruction] Saved {saved}/{len(leads)} leads")
+    except Exception as e:
+        print(f"[NewConstruction] Job error: {e}")
+    finally:
+        await s.close()
 
 
 # ── Scheduler ──────────────────────────────────────────────────────────────
@@ -387,6 +537,22 @@ def schedule_jobs():
     scheduler.add_job(dm_queue_processor_job, IntervalTrigger(minutes=5),
                       id="dm_queue", name="Auto-DM Queue Processor (5min)")
 
+    # Listing scrapers: daily at 7am
+    scheduler.add_job(run_listing_scrapers, CronTrigger(hour=7, minute=0),
+                      id="listing_scrapers", name="Listing Scrapers — Zillow/Realtor/Redfin (7am)")
+
+    # New construction: daily at 8am
+    scheduler.add_job(run_new_construction_job, CronTrigger(hour=8, minute=0),
+                      id="new_construction", name="New Construction Scraper (8am)")
+
+    # Pre-foreclosure + public records + Sunbiz: Monday at 6am
+    scheduler.add_job(run_preforeclosure_job, CronTrigger(day_of_week="mon", hour=6, minute=0),
+                      id="preforeclosure", name="Pre-Foreclosure Scraper (Mon 6am)")
+    scheduler.add_job(run_public_records_job, CronTrigger(day_of_week="mon", hour=6, minute=15),
+                      id="public_records", name="Public Records Scraper (Mon 6:15am)")
+    scheduler.add_job(run_sunbiz_job, CronTrigger(day_of_week="mon", hour=6, minute=30),
+                      id="sunbiz", name="Sunbiz LLC Scraper (Mon 6:30am)")
+
     scheduler.start()
 
 
@@ -404,6 +570,7 @@ async def startup_event():
     print("=" * 60)
     schedule_jobs()
     print("[+] Scheduler: Tier1=6h | Tier2=12h | Tier3=daily@6am")
+    print("[+] Property: Listings=daily@7am | NewCon=daily@8am | PreForeclosure/Records/Sunbiz=Mon@6am")
 
 
 @app.on_event("shutdown")
@@ -667,6 +834,51 @@ async def mark_reddit_replied(lead_id: int, body: dict):
     replied = bool(body.get("replied", True))
     db.mark_reddit_replied(lead_id, replied)
     return {"lead_id": lead_id, "marked_replied": replied}
+
+
+# ── Property Leads endpoints ───────────────────────────────────────────────
+
+@app.get("/api/property-leads")
+async def get_property_leads(score: str = None, lead_type: str = None, limit: int = 200):
+    leads = db.get_property_leads(score=score, lead_type=lead_type, limit=limit)
+    stats = db.get_property_lead_stats()
+    return {"count": len(leads), "stats": stats, "leads": leads}
+
+
+@app.post("/api/property-leads/{lead_id}/push-to-lofty")
+async def push_property_to_lofty(lead_id: int):
+    lead = db.get_property_lead(lead_id)
+    if not lead:
+        return {"error": "Property lead not found"}
+    result = await push_directly_to_lofty(lead)
+    if result:
+        db.mark_property_lofty_pushed(lead_id)
+        return {"status": "pushed", "lead_id": lead_id}
+    return {"status": "skipped", "reason": "Missing contact info or API key not configured"}
+
+
+@app.post("/api/property-leads/{lead_id}/send-sms")
+async def send_property_lead_sms(lead_id: int, body: dict = None):
+    lead = db.get_property_lead(lead_id)
+    if not lead:
+        return {"error": "Property lead not found"}
+    language = (body or {}).get("language", "spanish")
+    sent = await send_property_sms(lead, db=db, language=language)
+    if sent:
+        return {"status": "sent", "lead_id": lead_id}
+    return {"status": "skipped", "reason": "No phone, outside hours, cooldown active, or limit reached"}
+
+
+@app.post("/scan/listings")
+async def scan_listings(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_listing_scrapers)
+    return {"status": "Listing scraper triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/scan/preforeclosure")
+async def scan_preforeclosure(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_preforeclosure_job)
+    return {"status": "Pre-foreclosure scraper triggered", "timestamp": datetime.now().isoformat()}
 
 
 if __name__ == "__main__":

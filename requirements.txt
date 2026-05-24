@@ -6,4 +6,7 @@ apscheduler==3.10.4
 python-dotenv==1.0.0
 playwright>=1.44.0
 psycopg2-binary>=2.9.9
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+pytz>=2024.1
 
