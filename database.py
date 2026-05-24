@@ -95,6 +95,20 @@ class LeadDatabase:
             )
         """)
 
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS dm_queue (
+                id {_PK},
+                lead_id INTEGER,
+                ig_username TEXT NOT NULL,
+                source TEXT,
+                score TEXT,
+                priority INTEGER DEFAULT 2,
+                scheduled_for TIMESTAMP NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         conn.commit()
         cur.close()
         conn.close()
@@ -351,6 +365,128 @@ class LeadDatabase:
             FROM leads l
             LEFT JOIN qualifications q ON l.id = q.lead_id
             ORDER BY l.created_at DESC
+            LIMIT {PH}
+        """, (limit,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    # ── DM Queue ──────────────────────────────────────────────────────────────
+
+    def add_to_dm_queue(self, lead_id: int, ig_username: str, source: str, score: str) -> Optional[int]:
+        """Add an Instagram lead to the auto-DM queue with smart scheduling."""
+        import random
+        conn = get_db_connection()
+        cur = _cursor(conn)
+
+        # Skip if already pending in queue
+        cur.execute(f"SELECT id FROM dm_queue WHERE ig_username = {PH} AND status = 'pending'", (ig_username,))
+        if cur.fetchone():
+            cur.close(); conn.close(); return None
+
+        # Skip if already DM'd
+        cur.execute(f"SELECT id FROM dm_log WHERE instagram_username = {PH} AND status = 'sent'", (ig_username,))
+        if cur.fetchone():
+            cur.close(); conn.close(); return None
+
+        priority = 1 if score == "HOT" else 2
+        now = datetime.now()
+        today = now.date()
+        tomorrow = today + timedelta(days=1)
+        today_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        tomorrow_9am = datetime.combine(tomorrow, datetime.min.time()).replace(hour=9)
+
+        # Count DMs committed today (sent + pending)
+        day_start = datetime.combine(today, datetime.min.time())
+        day_end = datetime.combine(tomorrow, datetime.min.time())
+        cur.execute(
+            f"SELECT COUNT(*) AS cnt FROM dm_log WHERE status='sent' AND sent_at >= {PH} AND sent_at < {PH}",
+            (day_start, day_end),
+        )
+        sent_today = cur.fetchone()["cnt"]
+        cur.execute(
+            f"SELECT COUNT(*) AS cnt FROM dm_queue WHERE status='pending' AND scheduled_for >= {PH} AND scheduled_for < {PH}",
+            (day_start, day_end),
+        )
+        queued_today = cur.fetchone()["cnt"]
+        total_today = sent_today + queued_today
+
+        # Find last scheduled time for same or higher priority items
+        cur.execute(
+            f"SELECT MAX(scheduled_for) AS last_sf FROM dm_queue WHERE status='pending' AND priority <= {PH}",
+            (priority,),
+        )
+        row = cur.fetchone()
+        last_sf = row["last_sf"] if row and row.get("last_sf") else None
+        if last_sf and isinstance(last_sf, str):
+            last_sf = datetime.fromisoformat(last_sf)
+
+        # Scheduling logic
+        if total_today >= 15:
+            scheduled_for = tomorrow_9am + timedelta(minutes=random.randint(0, 20))
+        elif now.hour >= 20:
+            scheduled_for = tomorrow_9am + timedelta(minutes=random.randint(0, 20))
+        elif now.hour < 9:
+            scheduled_for = today_9am + timedelta(minutes=random.randint(0, 20))
+        elif last_sf and last_sf > now:
+            scheduled_for = last_sf + timedelta(seconds=random.randint(180, 420))
+            if scheduled_for.hour >= 20:
+                scheduled_for = tomorrow_9am + timedelta(minutes=random.randint(0, 20))
+        else:
+            delay = random.randint(5, 30) if score == "HOT" else random.randint(30, 60)
+            scheduled_for = now + timedelta(minutes=delay)
+            if scheduled_for.hour >= 20:
+                scheduled_for = tomorrow_9am + timedelta(minutes=random.randint(0, 20))
+
+        if USE_POSTGRES:
+            cur.execute("""
+                INSERT INTO dm_queue (lead_id, ig_username, source, score, priority, scheduled_for)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            """, (lead_id, ig_username, source, score, priority, scheduled_for))
+            queue_id = cur.fetchone()["id"]
+        else:
+            cur.execute("""
+                INSERT INTO dm_queue (lead_id, ig_username, source, score, priority, scheduled_for)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (lead_id, ig_username, source, score, priority, scheduled_for))
+            queue_id = cur.lastrowid
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"[Queue] {score} @{ig_username} → scheduled {scheduled_for.strftime('%H:%M')} (queue_id={queue_id})")
+        return queue_id
+
+    def get_dm_queue_stats(self) -> Dict[str, Any]:
+        """Pending count and next scheduled DM time."""
+        now = datetime.now()
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute("SELECT COUNT(*) AS cnt FROM dm_queue WHERE status='pending'")
+        pending = cur.fetchone()["cnt"]
+        cur.execute(
+            f"SELECT MIN(scheduled_for) AS next_sf FROM dm_queue WHERE status='pending' AND scheduled_for >= {PH}",
+            (now,),
+        )
+        row = cur.fetchone()
+        next_sf = row["next_sf"] if row else None
+        cur.close()
+        conn.close()
+        if next_sf and isinstance(next_sf, str):
+            next_sf = datetime.fromisoformat(next_sf)
+        return {
+            "pending": pending,
+            "next_scheduled": next_sf.isoformat() if next_sf else None,
+        }
+
+    def get_dm_queue(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Recent dm_queue rows for display."""
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        cur.execute(f"""
+            SELECT * FROM dm_queue
+            ORDER BY scheduled_for ASC
             LIMIT {PH}
         """, (limit,))
         rows = cur.fetchall()

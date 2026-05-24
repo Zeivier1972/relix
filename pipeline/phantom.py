@@ -23,7 +23,7 @@ DB_PATH = os.getenv("DB_PATH", "./leads.db")
 # Safety limits — conservative to protect the account
 # Start at 8/day for the first week, raise to 15 after two weeks of clean runs
 # ---------------------------------------------------------------------------
-MAX_DMS_PER_DAY = 8
+MAX_DMS_PER_DAY = 15
 START_HOUR = 9    # 9 am — avoid very early sends
 END_HOUR = 20     # 8 pm — stop earlier to look natural
 MIN_DELAY_SEC = 180   # 3 min minimum between DMs
@@ -522,6 +522,76 @@ class InstagramDMBot:
 
         total = _count_dms_today()
         print(f"[Phantom] Run complete. DMs sent today: {total}/{MAX_DMS_PER_DAY}")
+
+
+# ---------------------------------------------------------------------------
+# Auto-DM queue processor
+# ---------------------------------------------------------------------------
+
+def _update_queue_status(queue_id: int, status: str):
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(f"UPDATE dm_queue SET status = {PH} WHERE id = {PH}", (status, queue_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+async def process_dm_queue(auto_dm_enabled: bool = True) -> dict:
+    """Pick the next due item from dm_queue and send it. Called every 5 min by scheduler."""
+    if not auto_dm_enabled:
+        return {"status": "disabled"}
+
+    if not _is_within_hours():
+        return {"status": "outside_hours"}
+
+    dms_today = _count_dms_today()
+    if dms_today >= MAX_DMS_PER_DAY:
+        return {"status": "daily_limit_reached", "sent_today": dms_today}
+
+    now = datetime.now()
+    conn = get_db_connection()
+    cur = _cursor(conn)
+    cur.execute(f"""
+        SELECT * FROM dm_queue
+        WHERE status = 'pending' AND scheduled_for <= {PH}
+        ORDER BY priority ASC, scheduled_for ASC
+        LIMIT 1
+    """, (now,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not row:
+        return {"status": "no_due_items"}
+
+    item = dict(row)
+    ig_username = item["ig_username"]
+    source = item.get("source") or ""
+    lead_id = item.get("lead_id")
+    queue_id = item["id"]
+
+    if _already_dmed(ig_username):
+        _update_queue_status(queue_id, "cancelled")
+        return {"status": "already_sent", "username": ig_username}
+
+    print(f"[AutoDM] [{item.get('score','?')}] @{ig_username} — sending now")
+    message = _build_message(ig_username, source)
+
+    bot = InstagramDMBot()
+    async with async_playwright() as p:
+        await bot.setup(p)
+        if not await bot.login():
+            await bot.teardown()
+            _update_queue_status(queue_id, "failed")
+            return {"status": "login_failed"}
+        success = await bot.send_dm(ig_username, message, lead_id=lead_id, source=source)
+        await bot.teardown()
+
+    final_status = "sent" if success else "failed"
+    _update_queue_status(queue_id, final_status)
+    print(f"[AutoDM] @{ig_username} → {final_status}")
+    return {"status": final_status, "username": ig_username, "score": item.get("score")}
 
 
 # ---------------------------------------------------------------------------

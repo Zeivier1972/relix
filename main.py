@@ -20,7 +20,7 @@ from qualifier.claude_qualifier import ClaudeLeadQualifier
 from pipeline.twilio_alert import TwilioWhatsAppAlerts
 from pipeline.lofty import LoftyCRMClient
 from pipeline.phantom import (run_dm_bot, get_dm_log, _count_dms_today,
-                              send_dm_to_lead, build_dm_preview)
+                              send_dm_to_lead, build_dm_preview, process_dm_queue)
 
 PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
@@ -146,6 +146,7 @@ qualifier = ClaudeLeadQualifier()
 scheduler = AsyncIOScheduler()
 
 _job_running = False
+auto_dm_enabled = True          # toggled by /api/auto-dm/toggle
 
 job_status = {
     "tier1": {"status": "idle", "last_run": None, "leads_found": 0},
@@ -234,8 +235,11 @@ async def _run_reddit(source_counts, subreddits):
         await reddit.close()
 
 
+_IG_SOURCES = {"instagram_hashtags", "instagram_comments", "instagram"}
+
+
 async def _qualify_and_alert():
-    """Qualify all new leads and send Twilio SMS for HOT/WARM."""
+    """Qualify all new leads, send Twilio SMS, and queue Instagram HOT/WARM for auto-DM."""
     twilio = TwilioWhatsAppAlerts()
     new_leads = db.get_new_leads(limit=150)
     qualified = 0
@@ -256,6 +260,14 @@ async def _qualify_and_alert():
                         "qualification_score": score,
                         "qualification_reasoning": reasoning,
                     })
+                    # Auto-DM queue: only Instagram leads can be DM'd
+                    if lead.get("source") in _IG_SOURCES:
+                        db.add_to_dm_queue(
+                            lead_id=lead["id"],
+                            ig_username=lead["name"],
+                            source=lead["source"],
+                            score=score,
+                        )
             except Exception as e:
                 print(f"  [-] Qualify error for {lead.get('name')}: {e}")
     finally:
@@ -344,6 +356,15 @@ async def scrape_tier3_job():
     )
 
 
+# ── Auto-DM queue processor job ────────────────────────────────────────────
+
+async def dm_queue_processor_job():
+    global auto_dm_enabled
+    result = await process_dm_queue(auto_dm_enabled=auto_dm_enabled)
+    if result["status"] not in ("no_due_items", "outside_hours", "disabled"):
+        print(f"[AutoDM] Queue processor: {result}")
+
+
 # ── Scheduler ──────────────────────────────────────────────────────────────
 
 def schedule_jobs():
@@ -360,6 +381,10 @@ def schedule_jobs():
     # Tier 3: daily at 6 am
     scheduler.add_job(scrape_tier3_job, CronTrigger(hour=6, minute=0),
                       id="tier3_daily", name="Tier 3 — Broad Market (6am)")
+
+    # Auto-DM queue: check every 5 minutes
+    scheduler.add_job(dm_queue_processor_job, IntervalTrigger(minutes=5),
+                      id="dm_queue", name="Auto-DM Queue Processor (5min)")
 
     scheduler.start()
 
@@ -388,9 +413,15 @@ async def root():
 
 @app.get("/api/dashboard")
 async def api_dashboard():
+    queue_stats = db.get_dm_queue_stats()
     return {
         "stats": db.get_stats(),
         "leads": db.get_leads_with_scores(limit=200),
+        "auto_dm": {
+            "enabled": auto_dm_enabled,
+            "pending_in_queue": queue_stats["pending"],
+            "next_scheduled": queue_stats["next_scheduled"],
+        },
     }
 
 
@@ -453,11 +484,42 @@ async def phantom_status():
 
 @app.get("/api/dm-status")
 async def api_dm_status():
+    queue_stats = db.get_dm_queue_stats()
     return {
         "stats": db.get_dm_stats(),
         "leads": db.get_leads_with_dm_status(limit=500),
         "dms_today": _count_dms_today(),
-        "daily_limit": 8,
+        "daily_limit": 15,
+        "auto_dm": {
+            "enabled": auto_dm_enabled,
+            "pending_in_queue": queue_stats["pending"],
+            "next_scheduled": queue_stats["next_scheduled"],
+        },
+    }
+
+
+@app.post("/api/auto-dm/toggle")
+async def toggle_auto_dm():
+    global auto_dm_enabled
+    auto_dm_enabled = not auto_dm_enabled
+    queue_stats = db.get_dm_queue_stats()
+    print(f"[AutoDM] {'ENABLED' if auto_dm_enabled else 'DISABLED'} by user")
+    return {
+        "auto_dm_enabled": auto_dm_enabled,
+        "pending_in_queue": queue_stats["pending"],
+        "next_scheduled": queue_stats["next_scheduled"],
+    }
+
+
+@app.get("/api/auto-dm/status")
+async def auto_dm_status():
+    queue_stats = db.get_dm_queue_stats()
+    return {
+        "enabled": auto_dm_enabled,
+        "pending_in_queue": queue_stats["pending"],
+        "next_scheduled": queue_stats["next_scheduled"],
+        "dms_today": _count_dms_today(),
+        "daily_limit": 15,
     }
 
 

@@ -439,8 +439,34 @@
 <div class="tab-panel" id="tab-dm">
 <div class="container">
 
+  <!-- Auto-DM status bar -->
+  <div id="auto-dm-bar" style="
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+    background:#f0fdf9;border:1.5px solid #0ABAB5;border-radius:10px;
+    padding:12px 16px;margin-top:16px;margin-bottom:14px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span id="auto-dm-badge" style="
+        display:inline-block;padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:700;
+        background:#0ABAB5;color:#fff;letter-spacing:.04em;">AUTO-DM: ON</span>
+      <div>
+        <div style="font-size:.82rem;font-weight:600;color:#1a1a2e;">Instagram DM Automation</div>
+        <div id="auto-dm-next" style="font-size:.75rem;color:#555;">
+          Next DM: checking…
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span id="auto-dm-queue-count" style="font-size:.8rem;color:#555;">— in queue</span>
+      <button id="auto-dm-toggle-btn" onclick="toggleAutoDM()"
+        style="padding:7px 18px;border-radius:8px;border:none;cursor:pointer;
+               font-size:.82rem;font-weight:700;background:#0ABAB5;color:#fff;">
+        Turn OFF
+      </button>
+    </div>
+  </div>
+
   <!-- DM Stats -->
-  <div class="dm-stats" style="margin-top:16px;">
+  <div class="dm-stats">
     <div class="dm-stat sent">
       <div class="lbl">✅ Sent</div>
       <div class="val" id="dm-sent">—</div>
@@ -458,8 +484,8 @@
   <!-- Send All button -->
   <div class="ctrl" style="margin-bottom:16px;">
     <div class="ctrl-left">
-      <div class="status-row" style="font-size:.87rem;font-weight:600;">Instagram DM Bot</div>
-      <div class="dm-quota" id="dm-quota">Today: — / 8 DMs sent</div>
+      <div class="status-row" style="font-size:.87rem;font-weight:600;">Manual DM Bot</div>
+      <div class="dm-quota" id="dm-quota">Today: — / 15 DMs sent</div>
     </div>
     <button class="btn-send-all" id="dm-send-all-btn" onclick="sendAllDMs()">
       Send DMs Now
@@ -751,6 +777,44 @@ async function sendAllDMs() {
   }
 }
 
+function renderAutoDMBar(autoDm) {
+  if (!autoDm) return;
+  const enabled = autoDm.enabled;
+  const badge   = document.getElementById('auto-dm-badge');
+  const btn     = document.getElementById('auto-dm-toggle-btn');
+  const next    = document.getElementById('auto-dm-next');
+  const qcount  = document.getElementById('auto-dm-queue-count');
+  const bar     = document.getElementById('auto-dm-bar');
+
+  badge.textContent = enabled ? 'AUTO-DM: ON' : 'AUTO-DM: OFF';
+  badge.style.background = enabled ? '#0ABAB5' : '#94a3b8';
+  btn.textContent = enabled ? 'Turn OFF' : 'Turn ON';
+  btn.style.background = enabled ? '#94a3b8' : '#0ABAB5';
+  bar.style.background = enabled ? '#f0fdf9' : '#f8fafc';
+  bar.style.borderColor = enabled ? '#0ABAB5' : '#cbd5e1';
+
+  if (autoDm.next_scheduled) {
+    const t = new Date(autoDm.next_scheduled);
+    next.textContent = enabled
+      ? `Next DM: ${t.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`
+      : 'Auto-DM is paused';
+  } else {
+    next.textContent = enabled ? 'Next DM: no items queued' : 'Auto-DM is paused';
+  }
+  qcount.textContent = `${autoDm.pending_in_queue ?? 0} in queue`;
+}
+
+async function toggleAutoDM() {
+  const btn = document.getElementById('auto-dm-toggle-btn');
+  btn.disabled = true;
+  try {
+    const res  = await fetch('/api/auto-dm/toggle', { method: 'POST' });
+    const data = await res.json();
+    renderAutoDMBar({ enabled: data.auto_dm_enabled, ...data });
+  } catch(e) { console.error('toggle error', e); }
+  finally { btn.disabled = false; }
+}
+
 async function loadDMStatus() {
   try {
     const res  = await fetch('/api/dm-status');
@@ -762,6 +826,7 @@ async function loadDMStatus() {
     document.getElementById('dm-quota').textContent   =
       `Today: ${data.dms_today} / ${data.daily_limit} DMs sent`;
 
+    renderAutoDMBar(data.auto_dm);
     renderDMFeed(data.leads);
     document.getElementById('dm-footer').textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch(e) { console.error('dm-status error', e); }
