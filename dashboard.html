@@ -614,6 +614,88 @@
       font-size: .76rem; color: var(--muted);
       margin: 4px 0 8px; font-style: italic; line-height: 1.5;
     }
+
+    /* ── All Ads grid ────────────────────────────────── */
+    .ad-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .ad-card {
+      background: var(--card);
+      border-radius: var(--r);
+      padding: 12px 14px;
+      box-shadow: var(--sh);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--tiffany);
+      font-size: .82rem;
+    }
+    .ad-card:hover { box-shadow: var(--sh-md); }
+    .ad-card .adv-name {
+      font-weight: 700; font-size: .88rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+    .ad-card .kw-tag {
+      display: inline-block;
+      background: #e0faf9; color: var(--tiffany-dark);
+      border-radius: 4px; padding: 1px 6px;
+      font-size: .65rem; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .03em;
+      margin-bottom: 5px;
+    }
+    .ad-card .days-num {
+      font-size: 1.3rem; font-weight: 800; color: var(--tiffany);
+      line-height: 1;
+    }
+    .ad-card .days-lbl {
+      font-size: .6rem; color: var(--muted); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em;
+    }
+    .ad-card .ad-body-preview {
+      font-size: .76rem; color: #374151; line-height: 1.5;
+      margin: 8px 0 6px;
+      display: -webkit-box; -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .ad-card .ad-body-preview.expanded {
+      display: block; -webkit-line-clamp: unset;
+    }
+    .intel-filter-bar {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      margin: 12px 0 6px; align-items: center;
+    }
+    .intel-filter-bar input {
+      flex: 1; min-width: 180px;
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 7px 12px; font-size: .82rem;
+      outline: none; font-family: inherit;
+    }
+    .intel-filter-bar input:focus { border-color: var(--tiffany); }
+    .intel-filter-bar select {
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 7px 10px; font-size: .82rem;
+      font-family: inherit; background: white; cursor: pointer;
+    }
+    .adv-section { margin-bottom: 6px; }
+    .adv-toggle-btn {
+      background: none; border: none; cursor: pointer;
+      font-size: .78rem; color: var(--tiffany-dark);
+      padding: 0; text-decoration: underline; font-family: inherit;
+    }
+    .adv-list { display: none; }
+    .adv-list.open { display: block; }
+    .intel-section-hdr {
+      display: flex; align-items: center; gap: 10px;
+      margin: 18px 0 6px;
+    }
+    .intel-section-hdr h2 { margin: 0; }
+    .intel-count-badge {
+      background: var(--tiffany); color: white;
+      border-radius: 20px; padding: 2px 10px;
+      font-size: .72rem; font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -787,31 +869,61 @@
     <div class="stat warm" ><div class="lbl">Queued for DM</div><div class="val" id="ci-dm-queued">—</div></div>
   </div>
 
-  <div class="feed-hdr" style="margin-top:4px;">
-    <h2>Top 10 Advertisers in Your Market</h2>
-    <div style="display:flex;gap:8px;">
+  <div class="feed-hdr" style="margin-top:10px;">
+    <h2>Advertisers in Your Market</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span id="ci-last-scan" style="font-size:.7rem;color:var(--muted);"></span>
       <button class="btn-scan" style="padding:8px 16px;font-size:.8rem;" onclick="triggerFbAdsScan()">🔄 Scan Ads</button>
       <button class="btn-refresh" onclick="loadIntel()">↻ Refresh</button>
     </div>
   </div>
-  <p style="font-size:.76rem;color:var(--muted);margin-bottom:14px;">
-    Ads running longest = proven messaging. Add <code>FACEBOOK_ACCESS_TOKEN</code> to Railway for full data.
-    Without it, the web fallback provides partial results.
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:10px;">
+    Sorted by longest-running ad — ads that run longest have proven ROI.
+    Ads run on Facebook <strong>and</strong> Instagram (same creative, both platforms).
   </p>
 
+  <!-- Advertiser leaderboard -->
   <div id="intel-advertisers">
     <div class="empty">Loading…</div>
   </div>
 
-  <div class="feed-hdr" style="margin-top:20px;">
-    <h2>Buyer Leads from Ad Comments</h2>
+  <!-- All individual ads -->
+  <div class="intel-section-hdr" style="margin-top:22px;">
+    <h2>All Ads</h2>
+    <span class="intel-count-badge" id="ci-all-ads-count">0</span>
+  </div>
+  <p style="font-size:.76rem;color:var(--muted);margin-bottom:8px;">
+    Every real estate ad found in Miami metro — Brickell, Homestead, Doral, Aventura, Fort Lauderdale and more.
+    Click any ad to see the full copy and open it on Facebook/Instagram.
+  </p>
+
+  <div class="intel-filter-bar">
+    <input type="text" id="ci-search" placeholder="Search advertiser or ad text…" oninput="filterAds()">
+    <select id="ci-sort" onchange="filterAds()">
+      <option value="days">Sort: Days Running</option>
+      <option value="newest">Sort: Newest First</option>
+      <option value="az">Sort: A–Z</option>
+    </select>
+    <select id="ci-kw-filter" onchange="filterAds()">
+      <option value="">All Keywords</option>
+    </select>
+  </div>
+
+  <div class="ad-grid" id="intel-all-ads">
+    <div class="empty" style="grid-column:1/-1;">No ads yet — click Scan Ads to start.</div>
+  </div>
+
+  <!-- Buyer leads from comment/snapshot analysis -->
+  <div class="intel-section-hdr" style="margin-top:24px;">
+    <h2>Buyer Leads from Ad Pages</h2>
+    <span class="intel-count-badge" id="ci-leads-count">0</span>
   </div>
   <p style="font-size:.76rem;color:var(--muted);margin-bottom:12px;">
-    People who commented buyer-intent phrases on competitor ads. Instagram handles auto-queued for DM.
+    People expressing buyer intent on competitor ads or pages. Instagram handles auto-queued for DM.
   </p>
 
   <div id="intel-buyer-leads">
-    <div class="empty">Loading…</div>
+    <div class="empty">No buyer leads found yet.</div>
   </div>
 
   <div class="footer" id="intel-footer"></div>
@@ -976,8 +1088,9 @@ async function load() {
 
     document.getElementById('dot').className       = 'dot' + (running ? ' running' : '');
     document.getElementById('status-txt').textContent = running ? 'Scanning…' : 'Idle';
-    document.getElementById('last-run').textContent   =
-      job.last_run ? 'Last scan: ' + new Date(job.last_run).toLocaleString() : 'Last scan: never';
+    const lastTs = job.last_run || status.last_scan;
+    document.getElementById('last-run').textContent =
+      lastTs ? 'Last scan: ' + new Date(lastTs).toLocaleString() : 'Last scan: never';
 
     const btn = document.getElementById('scan-btn');
     btn.disabled  = running;
@@ -1029,16 +1142,17 @@ function switchTab(name) {
 
 function renderRedditFeed(leads) {
   const feed = document.getElementById('reddit-feed');
+  // Always update counts first, even when empty
+  const replied    = (leads || []).filter(l => l.marked_replied).length;
+  const notReplied = (leads || []).length - replied;
+  document.getElementById('reddit-total').textContent         = (leads || []).length;
+  document.getElementById('reddit-replied-count').textContent = replied;
+  document.getElementById('reddit-pending-count').textContent = notReplied;
+
   if (!leads || !leads.length) {
     feed.innerHTML = '<div class="empty">No HOT Reddit leads yet. Run a scan to find them.</div>';
     return;
   }
-
-  const replied   = leads.filter(l => l.marked_replied).length;
-  const notReplied = leads.length - replied;
-  document.getElementById('reddit-total').textContent         = leads.length;
-  document.getElementById('reddit-replied-count').textContent = replied;
-  document.getElementById('reddit-pending-count').textContent = notReplied;
 
   feed.innerHTML = leads.map(l => {
     const raw       = l.raw_data || {};
@@ -1298,12 +1412,15 @@ async function toggleAutoDM() {
 
 // ── Competitor Intel tab ───────────────────────────────────────────────────
 
+let _allAdsCache = [];
+
 function renderAdvertiserCard(adv, rank) {
   const rankClass = rank === 1 ? 'gold' : rank === 2 ? 'silver' : rank === 3 ? 'bronze' : '';
-  const maxDays   = 365;
+  const maxDays   = Math.max(365, adv.max_days);
   const barWidth  = Math.min(100, Math.round((adv.max_days / maxDays) * 100));
   const spend     = adv.total_spend_lo > 0 ? `$${adv.total_spend_lo.toLocaleString()}+ est. spend` : '';
   const copyId    = `adcopy-${rank}`;
+  const kws       = (adv.keywords || []).slice(0, 3).map(k => `<span class="kw-tag">${esc(k)}</span>`).join(' ');
 
   return `
     <div class="intel-card">
@@ -1317,10 +1434,11 @@ function renderAdvertiserCard(adv, rank) {
             ${adv.ad_count} ad${adv.ad_count !== 1 ? 's' : ''} found
             ${spend ? ' · ' + spend : ''}
           </div>
+          <div style="margin-top:3px;">${kws}</div>
         </div>
         <div style="text-align:right;flex-shrink:0;">
-          <div style="font-size:1.3rem;font-weight:800;color:var(--tiffany);">${adv.max_days}</div>
-          <div style="font-size:.65rem;color:var(--muted);font-weight:600;text-transform:uppercase;">days running</div>
+          <div class="days-num" style="font-size:1.4rem;font-weight:800;color:var(--tiffany);">${adv.max_days}</div>
+          <div class="days-lbl">days running</div>
         </div>
       </div>
       <div class="running-bar">
@@ -1328,9 +1446,10 @@ function renderAdvertiserCard(adv, rank) {
       </div>
       <div class="actions" style="margin-top:8px;">
         ${adv.page_url ? `<a class="btn" href="${esc(adv.page_url)}" target="_blank" rel="noopener">↗ FB Page</a>` : ''}
+        <a class="btn" href="https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=${encodeURIComponent(adv.page_name)}&search_type=keyword_unordered" target="_blank" rel="noopener">🔍 View Ads</a>
         ${adv.top_ad_body || adv.top_ad_headline ? `
           <button class="btn" onclick="document.getElementById('${copyId}').classList.toggle('open')">
-            💡 View Top Ad Copy
+            💡 Top Ad Copy
           </button>` : ''}
       </div>
       ${(adv.top_ad_body || adv.top_ad_headline) ? `
@@ -1340,19 +1459,89 @@ function renderAdvertiserCard(adv, rank) {
     </div>`;
 }
 
+function renderAdCard(ad, idx) {
+  const bodyId    = `adbody-${idx}`;
+  const maxRef    = 365;
+  const barWidth  = Math.min(100, Math.round((ad.days_running / maxRef) * 100));
+  const kw        = ad.keyword_matched || '';
+  const platforms = ad.source === 'facebook_ads_library' ? '📘 FB + 📸 IG' : '📘 FB + 📸 IG';
+  const snapUrl   = ad.ad_snapshot_url || `https://www.facebook.com/ads/library/?id=${ad.ad_id}`;
+  const bodyText  = (ad.ad_body || '').trim();
+
+  return `
+    <div class="ad-card">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">
+        <div style="min-width:0;flex:1;">
+          <div class="adv-name" title="${esc(ad.page_name)}">${esc(ad.page_name || 'Unknown Advertiser')}</div>
+          ${kw ? `<span class="kw-tag">${esc(kw.replace(' miami','').replace(' florida',''))}</span>` : ''}
+        </div>
+        <div style="text-align:right;flex-shrink:0;">
+          <div class="days-num">${ad.days_running || '?'}</div>
+          <div class="days-lbl">days</div>
+        </div>
+      </div>
+      <div class="running-bar" style="margin:6px 0;">
+        <div class="running-bar-fill" style="width:${barWidth}%"></div>
+      </div>
+      ${bodyText ? `
+        <div class="ad-body-preview" id="${bodyId}">${esc(bodyText)}</div>
+        ${bodyText.length > 120 ? `<button class="adv-toggle-btn" onclick="toggleAdBody('${bodyId}',this)">Show more ▾</button>` : ''}
+      ` : ''}
+      <div class="actions" style="margin-top:8px;flex-wrap:wrap;gap:4px;">
+        <a class="btn" href="${esc(snapUrl)}" target="_blank" rel="noopener" style="font-size:.72rem;">📋 Full Ad</a>
+        <a class="btn" href="https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=US&q=${encodeURIComponent(ad.page_name||'')}&search_type=keyword_unordered" target="_blank" rel="noopener" style="font-size:.72rem;">🔍 All Their Ads</a>
+      </div>
+      <div style="font-size:.65rem;color:var(--muted);margin-top:5px;">${platforms}</div>
+    </div>`;
+}
+
+function toggleAdBody(id, btn) {
+  const el = document.getElementById(id);
+  el.classList.toggle('expanded');
+  btn.textContent = el.classList.contains('expanded') ? 'Show less ▴' : 'Show more ▾';
+}
+
+function filterAds() {
+  const q      = (document.getElementById('ci-search').value || '').toLowerCase();
+  const sort   = document.getElementById('ci-sort').value;
+  const kwFilt = document.getElementById('ci-kw-filter').value;
+
+  let filtered = _allAdsCache.filter(ad => {
+    const name = (ad.page_name || '').toLowerCase();
+    const body = (ad.ad_body || '').toLowerCase();
+    const kw   = (ad.keyword_matched || '');
+    if (q && !name.includes(q) && !body.includes(q)) return false;
+    if (kwFilt && kw !== kwFilt) return false;
+    return true;
+  });
+
+  if (sort === 'days') filtered.sort((a,b) => (b.days_running||0) - (a.days_running||0));
+  else if (sort === 'newest') filtered.sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+  else if (sort === 'az') filtered.sort((a,b) => (a.page_name||'').localeCompare(b.page_name||''));
+
+  const el = document.getElementById('intel-all-ads');
+  document.getElementById('ci-all-ads-count').textContent = filtered.length;
+  if (!filtered.length) {
+    el.innerHTML = '<div class="empty" style="grid-column:1/-1;">No ads match your filter.</div>';
+    return;
+  }
+  el.innerHTML = filtered.map((ad, i) => renderAdCard(ad, i)).join('');
+}
+
 function renderBuyerLeadRow(lead) {
   const hasIG = lead.instagram_handle;
+  const scoreLabel = lead.score || 'WARM';
   return `
     <div class="buyer-lead-row">
       <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:4px;">
-        <span class="score HOT">HOT</span>
+        <span class="score ${scoreLabel}">${scoreLabel}</span>
         <span class="platform">${lead.language === 'spanish' ? '🇨🇴 Spanish' : '🇺🇸 English'}</span>
         <span style="font-weight:600;">${esc(lead.profile_name || 'Unknown')}</span>
         ${hasIG ? `<span style="color:var(--tiffany-dark);font-size:.75rem;">📸 @${esc(lead.instagram_handle)}</span>` : ''}
         ${lead.dm_queued ? `<span class="status-chip yes">DM Queued ✓</span>` : '<span class="status-chip no">No IG Handle</span>'}
         <span class="lead-time">${ago(lead.created_at)}</span>
       </div>
-      <div class="comment-txt">"${esc((lead.comment_text || '').slice(0, 200))}"</div>
+      <div class="comment-txt">"${esc((lead.comment_text || '').slice(0, 300))}"</div>
       <div class="listing-actions">
         ${lead.profile_url && !lead.profile_url.includes('snapshot')
           ? `<a class="btn" href="${esc(lead.profile_url)}" target="_blank" rel="noopener">↗ Profile</a>`
@@ -1363,7 +1552,7 @@ function renderBuyerLeadRow(lead) {
 
 async function loadIntel() {
   try {
-    const res  = await fetch('/api/fb-ads?limit=200');
+    const res  = await fetch('/api/fb-ads?limit=500');
     const data = await res.json();
 
     const stats = data.stats || {};
@@ -1372,32 +1561,76 @@ async function loadIntel() {
     document.getElementById('ci-buyer-leads').textContent = stats.total_leads ?? '—';
     document.getElementById('ci-dm-queued').textContent   = stats.dm_queued ?? '—';
 
-    const top = data.top_advertisers || [];
-    const advEl = document.getElementById('intel-advertisers');
-    if (!top.length) {
-      advEl.innerHTML = '<div class="empty">No competitor ads yet — click Scan Ads to start.</div>';
-    } else {
-      advEl.innerHTML = top.map((adv, i) => renderAdvertiserCard(adv, i + 1)).join('');
+    if (data.last_scan) {
+      document.getElementById('ci-last-scan').textContent =
+        'Last scan: ' + new Date(data.last_scan).toLocaleString();
     }
 
-    const leads = data.buyer_leads || [];
+    // Advertiser leaderboard
+    const advs  = data.top_advertisers || [];
+    const advEl = document.getElementById('intel-advertisers');
+    if (!advs.length) {
+      advEl.innerHTML = '<div class="empty">No competitor ads yet — click Scan Ads to start.</div>';
+    } else {
+      const show5 = advs.slice(0, 5);
+      const rest  = advs.slice(5);
+      let html    = show5.map((adv, i) => renderAdvertiserCard(adv, i + 1)).join('');
+      if (rest.length) {
+        const restId = 'adv-rest';
+        html += `
+          <button class="adv-toggle-btn" style="margin:6px 0;" onclick="
+            var el=document.getElementById('${restId}');
+            el.classList.toggle('open');
+            this.textContent=el.classList.contains('open')?'▴ Show fewer':'▾ Show all ${advs.length} advertisers';
+          ">▾ Show all ${advs.length} advertisers</button>
+          <div class="adv-list" id="${restId}">
+            ${rest.map((adv, i) => renderAdvertiserCard(adv, i + 6)).join('')}
+          </div>`;
+      }
+      advEl.innerHTML = html;
+    }
+
+    // All ads grid
+    const ads = data.ads || [];
+    _allAdsCache = ads;
+
+    // Populate keyword filter
+    const kwSet  = new Set(ads.map(a => a.keyword_matched).filter(Boolean));
+    const kwSel  = document.getElementById('ci-kw-filter');
+    kwSel.innerHTML = '<option value="">All Keywords</option>' +
+      [...kwSet].sort().map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+
+    filterAds();
+
+    // Buyer leads
+    const leads   = data.buyer_leads || [];
     const leadsEl = document.getElementById('intel-buyer-leads');
+    document.getElementById('ci-leads-count').textContent = leads.length;
     if (!leads.length) {
-      leadsEl.innerHTML = '<div class="empty">No buyer leads found yet — more comments become visible over time.</div>';
+      leadsEl.innerHTML = '<div class="empty">No buyer leads found yet — scan runs every 6h.</div>';
     } else {
       leadsEl.innerHTML = leads.map(renderBuyerLeadRow).join('');
     }
 
     document.getElementById('intel-footer').textContent =
-      `${top.length} advertisers · ${leads.length} buyer leads · Updated ${new Date().toLocaleTimeString()}`;
+      `${advs.length} advertisers · ${ads.length} ads · ${leads.length} buyer leads · Updated ${new Date().toLocaleTimeString()}`;
   } catch(e) { console.error('intel error', e); }
 }
 
 async function triggerFbAdsScan() {
+  const btn = document.querySelector('[onclick="triggerFbAdsScan()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Starting…'; }
   try {
     await fetch('/scan/fb-ads', { method: 'POST' });
-    alert('Facebook Ads Library scan triggered — results appear in 5-10 minutes.');
-  } catch(e) { console.error(e); }
+    if (btn) { btn.textContent = '⏳ Scanning…'; }
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Scan Ads'; }
+      loadIntel();
+    }, 12000);
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Scan Ads'; }
+    console.error(e);
+  }
 }
 
 // ── Listings tab ───────────────────────────────────────────────────────────

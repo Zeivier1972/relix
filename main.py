@@ -324,6 +324,7 @@ async def _scrape_and_qualify(tier: str, fb_groups, ig_hashtags,
         job_status[tier]["leads_found"] = total_scraped
         job_status["total_qualified"] = job_status.get("total_qualified", 0) + qualified
         job_status["hot_leads"] = job_status.get("hot_leads", 0) + hot
+        db.log_scan(tier, total_scraped)
 
         print(f"[{tier.upper()}] Done — scraped={total_scraped} qualified={qualified} hot={hot}")
         print(f"  Sources: {source_counts}")
@@ -482,6 +483,7 @@ async def run_fb_ads_job():
                 )
 
         print(f"[FBAds] Saved {saved_ads} ads | {saved_leads} buyer leads")
+        db.log_scan("fb_ads", saved_ads)
     except Exception as e:
         print(f"[FBAds] Job error: {e}")
     finally:
@@ -684,7 +686,17 @@ async def scan_tier3(background_tasks: BackgroundTasks):
 
 @app.get("/status")
 async def get_status():
-    return {"job_status": job_status, "timestamp": datetime.now().isoformat()}
+    last_scan = db.get_last_scan()
+    for tier in ("tier1", "tier2", "tier3"):
+        if job_status[tier]["last_run"] is None:
+            db_ts = db.get_last_scan(tier)
+            if db_ts:
+                job_status[tier]["last_run"] = db_ts
+    return {
+        "job_status":    job_status,
+        "last_scan":     last_scan,
+        "timestamp":     datetime.now().isoformat(),
+    }
 
 
 @app.get("/leads")
@@ -950,16 +962,18 @@ async def scan_fb_ads(background_tasks: BackgroundTasks):
 
 
 @app.get("/api/fb-ads")
-async def get_fb_ads(limit: int = 200):
-    ads   = db.get_fb_ads(limit=limit)
-    leads = db.get_fb_ad_leads(limit=100)
-    stats = db.get_fb_stats()
-    top10 = top_advertisers(ads, n=10)
+async def get_fb_ads(limit: int = 500):
+    ads       = db.get_fb_ads(limit=limit)
+    leads     = db.get_fb_ad_leads(limit=200)
+    stats     = db.get_fb_stats()
+    all_advs  = top_advertisers(ads)          # all, not capped
+    last_scan = db.get_last_scan("fb_ads")
     return {
         "stats":            stats,
-        "top_advertisers":  top10,
+        "top_advertisers":  all_advs,
         "ads":              ads,
         "buyer_leads":      leads,
+        "last_scan":        last_scan,
     }
 
 

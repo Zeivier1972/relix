@@ -10,15 +10,16 @@ PRIMARY PATH  (requires FACEBOOK_ACCESS_TOKEN in .env)
 
 FALLBACK PATH (no token)
   Launches a headless Chromium browser (Playwright) to load the Ad Library,
-  intercepts Facebook's internal GraphQL responses as they fire, and parses
-  the ad JSON directly. Passes the JS bot-detection challenge automatically.
+  waits for ads to render, then infinitely scrolls to load ALL available ads.
+  Passes Facebook's JS bot-detection challenge automatically.
   No login, no credentials needed.
 
-BUYER LEAD DETECTION
-  Ad comments are not exposed by the Ad Library or its internal API.
-  Buyer intent is detected from ad snapshot pages (public HTML).
-  Instagram handles found in ad copy or comments are auto-queued for DM.
-  Facebook-only leads are saved as WARM for manual follow-up.
+COMMENT LEADS
+  Facebook ad comments require login — not accessible without a session.
+  Buyer intent is detected from:
+    1. Ad copy itself (advertiser targeting signals)
+    2. Instagram handles found in ad copy → queued for DM
+    3. Public Facebook page posts (best-effort, some pages visible without login)
 """
 
 import asyncio
@@ -55,40 +56,69 @@ HEADERS = {
 # ── Search config ─────────────────────────────────────────────────────────────
 
 SEARCH_KEYWORDS = [
+    # English — Miami metro
     "real estate miami",
-    "casas en miami",
-    "preconstruccion miami",
-    "homes for sale florida",
+    "homes for sale miami",
     "condos miami",
-    "investment property florida",
-    "colombianos miami",
+    "condos brickell miami",
+    "homes homestead florida",
+    "investment property miami",
+    "pre-construction florida",
+    "new construction miami",
+    "miami beach condos for sale",
+    "aventura condos",
+    "doral homes for sale",
+    "coral gables real estate",
+    "south florida real estate",
+    "buy home miami florida",
+    "luxury condos miami",
+    # Spanish — targeting Latino/Colombian buyers
+    "casas en miami",
+    "casas en venta miami",
+    "preconstruccion miami",
     "casas florida",
     "invertir en miami",
-    "pre-construction florida",
     "nueva construccion miami",
+    "bienes raices miami",
+    "apartamentos miami venta",
+    "casas en homestead florida",
+    "propiedades miami florida",
 ]
 
 LOCATIONS = [
     "Miami, Florida",
+    "Miami Beach, Florida",
+    "Brickell, Florida",
+    "Coral Gables, Florida",
+    "Doral, Florida",
+    "Hialeah, Florida",
     "Homestead, Florida",
+    "Kendall, Florida",
+    "Aventura, Florida",
+    "Hollywood, Florida",
+    "Pembroke Pines, Florida",
+    "Fort Lauderdale, Florida",
     "Broward County, Florida",
     "West Palm Beach, Florida",
-    "Orlando, Florida",
+    "Boca Raton, Florida",
 ]
 
-# Keywords that signal buyer intent in comment text
+# Buyer intent phrases — English and Spanish
 _BUYER_INTENT_EN = [
     "interested", "how much", "i want to buy", "contact me",
     "call me", "dm me", "price?", "available?", "where is this?",
     "send info", "more info", "how do i", "what's the price",
     "is it available", "i'm looking", "i am looking",
+    "how can i get", "what is the process", "ready to buy",
+    "looking for a home", "first time buyer", "i need an agent",
 ]
 _BUYER_INTENT_ES = [
     "me interesa", "cuánto cuesta", "cuanto cuesta", "quiero comprar",
     "información", "informacion", "contacto", "llámame", "llamame",
     "precio", "disponible", "cómo aplico", "como aplico",
     "me pueden contactar", "quiero información", "quiero informacion",
-    "donde queda", "qué precio", "que precio",
+    "donde queda", "qué precio", "que precio", "busco casa",
+    "necesito agente", "primera vez comprando", "cómo funciona",
 ]
 _ALL_INTENT = _BUYER_INTENT_EN + _BUYER_INTENT_ES
 
@@ -96,7 +126,6 @@ _IG_HANDLE_RE = re.compile(r"(?:instagram\.com/|@)([A-Za-z0-9_.]{3,30})")
 
 
 def _has_buyer_intent(text: str) -> Tuple[bool, str]:
-    """Return (has_intent, language)."""
     t = text.lower()
     for kw in _BUYER_INTENT_ES:
         if kw in t:
@@ -118,7 +147,6 @@ def _days_running(start_date_str: str) -> int:
 
 
 def _parse_spend(spend: dict) -> Tuple[int, int]:
-    """Return (lower_bound, upper_bound) in USD."""
     if not spend:
         return 0, 0
     try:
@@ -145,7 +173,7 @@ def _parse_impressions(imp: dict) -> Tuple[int, int]:
 class FacebookAdsLibraryScraper:
     """
     Competitor intelligence via Facebook Ad Library.
-    Primary: official API  |  Fallback: public HTML parsing.
+    Primary: official API  |  Fallback: Playwright infinite-scroll DOM parsing.
     """
 
     def __init__(self):
@@ -158,10 +186,6 @@ class FacebookAdsLibraryScraper:
 
     async def _api_search(self, keyword: str,
                           after: Optional[str] = None) -> Tuple[List[dict], Optional[str]]:
-        """
-        Call the Ad Library API for one keyword.
-        Returns (ads_list, next_cursor).
-        """
         fields = ",".join([
             "id", "ad_snapshot_url", "ad_creative_bodies",
             "ad_creative_link_captions", "ad_creative_link_descriptions",
@@ -171,21 +195,20 @@ class FacebookAdsLibraryScraper:
             "demographic_distribution",
         ])
         params = {
-            "access_token":        FACEBOOK_ACCESS_TOKEN,
-            "ad_type":             "ALL",
+            "access_token":         FACEBOOK_ACCESS_TOKEN,
+            "ad_type":              "ALL",
             "ad_reached_countries": '["US"]',
-            "search_terms":        keyword,
-            "ad_active_status":    "ACTIVE",
-            "fields":              fields,
-            "limit":               50,
+            "search_terms":         keyword,
+            "ad_active_status":     "ACTIVE",
+            "fields":               fields,
+            "limit":                50,
         }
         if after:
             params["after"] = after
-
         try:
             resp = await self.client.get(_AD_ARCHIVE, params=params)
             if resp.status_code == 401:
-                print("[FBAds-API] Token expired or invalid — switch to web fallback")
+                print("[FBAds-API] Token expired — switching to web fallback")
                 self._use_api = False
                 return [], None
             if resp.status_code == 200:
@@ -199,9 +222,9 @@ class FacebookAdsLibraryScraper:
         return [], None
 
     def _parse_api_ad(self, ad: dict, keyword: str) -> Optional[Dict[str, Any]]:
-        bodies      = ad.get("ad_creative_bodies") or []
-        titles      = ad.get("ad_creative_link_titles") or []
-        captions    = ad.get("ad_creative_link_captions") or []
+        bodies       = ad.get("ad_creative_bodies") or []
+        titles       = ad.get("ad_creative_link_titles") or []
+        captions     = ad.get("ad_creative_link_captions") or []
         descriptions = ad.get("ad_creative_link_descriptions") or []
 
         body     = " | ".join(bodies)[:1000]
@@ -220,44 +243,40 @@ class FacebookAdsLibraryScraper:
         page_url  = f"https://www.facebook.com/{page_id}" if page_id else ""
 
         return {
-            "ad_id":           ad.get("id", ""),
-            "page_name":       page_name,
-            "page_id":         page_id,
-            "ad_body":         body,
-            "ad_headline":     headline,
-            "ad_caption":      caption,
-            "ad_description":  desc,
-            "ad_snapshot_url": snapshot,
-            "page_url":        page_url,
-            "start_date":      start_date,
-            "days_running":    days,
-            "spend_lower":     spend_lo,
-            "spend_upper":     spend_hi,
+            "ad_id":             ad.get("id", ""),
+            "page_name":         page_name,
+            "page_id":           page_id,
+            "ad_body":           body,
+            "ad_headline":       headline,
+            "ad_caption":        caption,
+            "ad_description":    desc,
+            "ad_snapshot_url":   snapshot,
+            "page_url":          page_url,
+            "start_date":        start_date,
+            "days_running":      days,
+            "spend_lower":       spend_lo,
+            "spend_upper":       spend_hi,
             "impressions_lower": imp_lo,
             "impressions_upper": imp_hi,
-            "keyword_matched": keyword,
-            "source":          "facebook_ads_library",
+            "keyword_matched":   keyword,
+            "source":            "facebook_ads_library",
         }
 
     # ── Playwright fallback path ──────────────────────────────────────────────
 
-    async def _playwright_search(self, keyword: str) -> List[Dict[str, Any]]:
+    async def _playwright_search(self, keyword: str,
+                                 max_ads: int = 200) -> List[Dict[str, Any]]:
         """
-        Headless Chromium renders the Ad Library page, passes the JS challenge,
-        then parses the rendered DOM text directly.
+        Headless Chromium renders the Ad Library, then infinitely scrolls
+        to load ALL ads (up to max_ads). Parses rendered DOM text directly.
 
-        Page text structure (confirmed from live run):
-          Active
-          Library ID: 1379486973398374
-          Started running on Feb 3, 2026
-          Platforms ...
-          [N] ads use this creative
-          Open Dropdown
-          See summary details
+        DOM structure (confirmed from live run):
+          Library ID: [numeric_id]
+          Started running on [Month D, YYYY]
+          Active | Platforms | N ads use this creative
           [Advertiser Name]
           Sponsored
           [Ad copy text]
-          ...
         """
         from playwright.async_api import async_playwright
 
@@ -284,9 +303,10 @@ class FacebookAdsLibraryScraper:
                     viewport={"width": 1280, "height": 900},
                 )
                 page = await ctx.new_page()
-                await page.goto(url, wait_until="domcontentloaded", timeout=35000)
-                # Wait for ad cards to render — poll for "Library ID:" text
-                for _ in range(12):
+                await page.goto(url, wait_until="domcontentloaded", timeout=40000)
+
+                # Wait for first ads to render
+                for _ in range(15):
                     await page.wait_for_timeout(1000)
                     txt = await page.inner_text("body")
                     if "Library ID:" in txt:
@@ -294,6 +314,23 @@ class FacebookAdsLibraryScraper:
                         break
                 else:
                     page_text = await page.inner_text("body")
+
+                # Infinite scroll — keep scrolling until no new ads appear or limit reached
+                prev_count = page_text.count("Library ID:")
+                for _scroll in range(12):
+                    if prev_count >= max_ads:
+                        print(f"[FBAds] '{keyword}': reached {prev_count} ads — stopping scroll")
+                        break
+                    # Scroll to bottom to trigger lazy loading
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await page.wait_for_timeout(2500)
+                    txt = await page.inner_text("body")
+                    new_count = txt.count("Library ID:")
+                    if new_count == prev_count:
+                        break  # No more ads loading
+                    prev_count = new_count
+                    page_text = txt
+                    print(f"[FBAds] '{keyword}': scrolled → {new_count} ads loaded")
 
                 await browser.close()
 
@@ -304,17 +341,10 @@ class FacebookAdsLibraryScraper:
         return self._parse_dom_text(page_text, keyword)
 
     def _parse_dom_text(self, text: str, keyword: str) -> List[Dict[str, Any]]:
-        """
-        Parse the rendered Ad Library page text.
-        Splits on 'Library ID:' boundaries, then extracts each ad's fields.
-        """
         ads = []
         if not text or "Library ID:" not in text:
             return ads
-
-        # Split into ad-block chunks
         blocks = re.split(r"Library ID:\s*", text)
-        # Skip the header block (before first Library ID)
         for block in blocks[1:]:
             try:
                 ad = self._parse_ad_block(block, keyword)
@@ -322,7 +352,6 @@ class FacebookAdsLibraryScraper:
                     ads.append(ad)
             except Exception:
                 continue
-
         return ads
 
     _MONTHS = {
@@ -331,19 +360,15 @@ class FacebookAdsLibraryScraper:
     }
 
     def _parse_ad_block(self, block: str, keyword: str) -> Optional[Dict[str, Any]]:
-        """
-        block starts immediately after 'Library ID:' and contains one ad's worth of text.
-        """
         lines = [l.strip() for l in block.split("\n") if l.strip()]
         if not lines:
             return None
 
-        # First non-empty line after split is the ad_id
         ad_id = lines[0].strip()
         if not re.match(r"^\d{10,}", ad_id):
-            return None  # doesn't look like a Library ID number
+            return None
 
-        # Find start date: "Started running on Month D, YYYY" or "Month D, YYYY"
+        # Start date
         start_date_raw = ""
         days_running   = 0
         date_re = re.compile(
@@ -355,23 +380,20 @@ class FacebookAdsLibraryScraper:
                 month_str, day, year = m.group(1)[:3], int(m.group(2)), int(m.group(3))
                 month = self._MONTHS.get(month_str.capitalize(), 1)
                 try:
-                    start_dt   = datetime(year, month, day)
+                    start_dt     = datetime(year, month, day)
                     days_running = max(0, (datetime.now() - start_dt).days)
                     start_date_raw = start_dt.strftime("%Y-%m-%d")
                 except ValueError:
                     pass
                 break
 
-        # Find advertiser name: the line just before "Sponsored"
+        # Advertiser: line immediately before "Sponsored"
         page_name = ""
         for i, line in enumerate(lines):
             if line == "Sponsored" and i > 0:
-                # The line before "Sponsored" is the advertiser name
                 page_name = lines[i - 1]
                 break
-
         if not page_name:
-            # Fallback: look for non-noise lines before the date block
             noise = {"Active", "Inactive", "Platforms", "Open Dropdown",
                      "See summary details", "Remove", "Filters", "Sort"}
             for line in lines[1:15]:
@@ -383,7 +405,7 @@ class FacebookAdsLibraryScraper:
                     page_name = line
                     break
 
-        # Ad copy: all text after "Sponsored" up to the next separator
+        # Ad copy: lines after "Sponsored"
         ad_body = ""
         sponsored_idx = None
         for i, line in enumerate(lines):
@@ -391,17 +413,19 @@ class FacebookAdsLibraryScraper:
                 sponsored_idx = i
                 break
         if sponsored_idx is not None:
-            # Collect lines after Sponsored, stop at noise markers
             stop_words = {"See more", "Like", "Comment", "Share", "Active",
                           "Library ID", "Started running", "Platforms", "Filters"}
             body_parts = []
-            for line in lines[sponsored_idx + 1:sponsored_idx + 30]:
+            for line in lines[sponsored_idx + 1:sponsored_idx + 40]:
                 if any(sw in line for sw in stop_words) or re.match(r"Library ID:", line):
                     break
                 body_parts.append(line)
-            ad_body = " ".join(body_parts)[:600]
+            ad_body = " ".join(body_parts)[:800]
 
-        # Ad snapshot URL
+        # Detect IG handle in body
+        ig_handles = _IG_HANDLE_RE.findall(ad_body)
+        ig_handle  = ig_handles[0] if ig_handles else None
+
         snapshot_url = f"https://www.facebook.com/ads/library/?id={ad_id}"
 
         return {
@@ -421,63 +445,114 @@ class FacebookAdsLibraryScraper:
             "impressions_lower": 0,
             "impressions_upper": 0,
             "keyword_matched":   keyword,
+            "ig_handle":         ig_handle,
             "source":            "facebook_ads_playwright",
         }
 
     # ── Comment / buyer lead extraction ──────────────────────────────────────
 
+    async def _scrape_page_public_posts(self, page_url: str,
+                                        page_name: str) -> List[Dict[str, Any]]:
+        """
+        Navigate to a public Facebook page and look for buyer-intent text
+        in visible posts/comments (no login required for public pages).
+        """
+        leads = []
+        if not page_url:
+            return leads
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"],
+                )
+                ctx = await browser.new_context(
+                    user_agent=HEADERS["User-Agent"],
+                    locale="en-US",
+                    viewport={"width": 1280, "height": 900},
+                )
+                page = await ctx.new_page()
+                await page.goto(page_url, wait_until="domcontentloaded", timeout=25000)
+                await page.wait_for_timeout(2000)
+
+                # Accept cookie consent if present
+                for sel in ['button[title="Allow all cookies"]',
+                            'button:text("Accept All")', 'button:text("OK")']:
+                    try:
+                        await page.click(sel, timeout=1500)
+                        await page.wait_for_timeout(1000)
+                        break
+                    except Exception:
+                        pass
+
+                # Scroll a little to reveal posts
+                await page.evaluate("window.scrollTo(0, 600)")
+                await page.wait_for_timeout(1500)
+
+                txt = await page.inner_text("body")
+                await browser.close()
+
+            paras = [p.strip() for p in txt.split("\n") if len(p.strip()) > 15]
+            for para in paras:
+                has_intent, lang = _has_buyer_intent(para)
+                if not has_intent:
+                    continue
+                ig_handles = _IG_HANDLE_RE.findall(para)
+                leads.append({
+                    "ad_id":            "",
+                    "profile_name":     f"Visitor on {page_name}",
+                    "profile_url":      page_url,
+                    "comment_text":     para[:500],
+                    "language":         lang,
+                    "instagram_handle": ig_handles[0] if ig_handles else None,
+                    "score":            "WARM",
+                    "source":           "facebook_page_post",
+                })
+                if len(leads) >= 8:
+                    break
+        except Exception as e:
+            print(f"[FBAds-PageScrape] {page_url[:60]} error: {e}")
+        return leads
+
     async def _scrape_snapshot_for_leads(self, ad: dict) -> List[Dict[str, Any]]:
-        """
-        Load the ad snapshot page and look for:
-        - Visible comments with buyer intent keywords
-        - Any Instagram handle mentions in the ad copy itself
-        Returns a list of raw lead dicts.
-        """
         leads = []
         snapshot_url = ad.get("ad_snapshot_url", "")
         ad_body = (ad.get("ad_body", "") + " " + ad.get("ad_description", "")).lower()
 
-        # Check if the ad copy itself mentions an Instagram handle (competitor's IG)
         ig_in_copy = _IG_HANDLE_RE.findall(ad_body)
-
-        # Scan ad copy for buyer-intent language (e.g. "DM us" or "call us")
-        # These indicate the advertiser is reaching buyers — useful intel
         body_intent, lang = _has_buyer_intent(ad_body)
 
         if not snapshot_url:
             return leads
-
         try:
             resp = await self.client.get(snapshot_url, timeout=20.0)
             if resp.status_code != 200:
                 return leads
 
             html  = resp.text
-            text  = re.sub(r"<[^>]+>", " ", html)   # strip tags
+            text  = re.sub(r"<[^>]+>", " ", html)
             paras = [p.strip() for p in text.split("\n") if len(p.strip()) > 10]
 
             for para in paras:
                 has_intent, language = _has_buyer_intent(para)
                 if not has_intent:
                     continue
-                # Try to find a name/handle near this text
                 ig_handles = _IG_HANDLE_RE.findall(para)
                 leads.append({
-                    "ad_id":          ad.get("ad_id", ""),
-                    "profile_name":   "Unknown (from ad snapshot)",
-                    "profile_url":    snapshot_url,
-                    "comment_text":   para[:500],
-                    "language":       language,
+                    "ad_id":            ad.get("ad_id", ""),
+                    "profile_name":     "Unknown (from ad snapshot)",
+                    "profile_url":      snapshot_url,
+                    "comment_text":     para[:500],
+                    "language":         language,
                     "instagram_handle": ig_handles[0] if ig_handles else None,
-                    "score":          "HOT",
-                    "source":         "facebook_ads_comment",
+                    "score":            "HOT",
+                    "source":           "facebook_ads_comment",
                 })
                 if len(leads) >= 10:
                     break
-
         except Exception as e:
             print(f"[FBAds-Snapshot] {snapshot_url[:60]} error: {e}")
-
         return leads
 
     # ── Aggregate ────────────────────────────────────────────────────────────
@@ -486,11 +561,11 @@ class FacebookAdsLibraryScraper:
         """
         Returns:
           {
-            "ads":   [ ... ]   competitor ad records
+            "ads":   [ ... ]   all competitor ad records
             "leads": [ ... ]   buyer-intent lead records
           }
         """
-        all_ads: List[Dict[str, Any]] = []
+        all_ads:   List[Dict[str, Any]] = []
         all_leads: List[Dict[str, Any]] = []
         seen_ad_ids: set = set()
 
@@ -504,9 +579,8 @@ class FacebookAdsLibraryScraper:
                     if parsed:
                         kw_ads.append(parsed)
             else:
-                kw_ads = await self._playwright_search(keyword)
+                kw_ads = await self._playwright_search(keyword, max_ads=200)
 
-            # Deduplicate by ad_id
             new_ads = []
             for ad in kw_ads:
                 if ad.get("ad_id") and ad["ad_id"] not in seen_ad_ids:
@@ -516,11 +590,11 @@ class FacebookAdsLibraryScraper:
                     new_ads.append(ad)
             all_ads.extend(new_ads)
 
-            print(f"[FBAds] '{keyword}': {len(new_ads)} ads")
-            await asyncio.sleep(random.uniform(2, 4))
+            print(f"[FBAds] '{keyword}': {len(new_ads)} new ads (total {len(all_ads)})")
+            await asyncio.sleep(random.uniform(3, 5))
 
-        # Check snapshot pages for buyer leads (sample — avoid rate limiting)
-        hot_ads = sorted(all_ads, key=lambda a: a.get("days_running", 0), reverse=True)[:20]
+        # Snapshot lead scan — check top 30 longest-running ads
+        hot_ads = sorted(all_ads, key=lambda a: a.get("days_running", 0), reverse=True)[:30]
         for ad in hot_ads:
             try:
                 leads = await self._scrape_snapshot_for_leads(ad)
@@ -529,7 +603,25 @@ class FacebookAdsLibraryScraper:
                 pass
             await asyncio.sleep(random.uniform(1.5, 3))
 
-        print(f"[FBAds] Total: {len(all_ads)} competitor ads | {len(all_leads)} buyer leads")
+        # Public page post scan — top 10 advertisers by days running
+        seen_pages: set = set()
+        top_by_days = sorted(all_ads, key=lambda a: a.get("days_running", 0), reverse=True)
+        for ad in top_by_days:
+            page_url = ad.get("page_url", "")
+            page_name = ad.get("page_name", "")
+            if not page_url or page_url in seen_pages:
+                continue
+            seen_pages.add(page_url)
+            if len(seen_pages) > 10:
+                break
+            try:
+                page_leads = await self._scrape_page_public_posts(page_url, page_name)
+                all_leads.extend(page_leads)
+            except Exception:
+                pass
+            await asyncio.sleep(random.uniform(2, 4))
+
+        print(f"[FBAds] Total: {len(all_ads)} ads | {len(all_leads)} buyer leads")
         return {"ads": all_ads, "leads": all_leads}
 
     async def close(self):
@@ -538,9 +630,11 @@ class FacebookAdsLibraryScraper:
 
 # ── Competitor report helpers ─────────────────────────────────────────────────
 
-def top_advertisers(ads: List[Dict[str, Any]], n: int = 10) -> List[Dict[str, Any]]:
+def top_advertisers(ads: List[Dict[str, Any]],
+                    n: Optional[int] = None) -> List[Dict[str, Any]]:
     """
-    Aggregate ads by page, return top N by longest-running ad (proxy for ROI).
+    Aggregate ads by page, return sorted by longest-running ad (proxy for ROI).
+    n=None returns all advertisers.
     """
     pages: Dict[str, Dict] = {}
     for ad in ads:
@@ -549,21 +643,26 @@ def top_advertisers(ads: List[Dict[str, Any]], n: int = 10) -> List[Dict[str, An
         key  = pid or name
         if key not in pages:
             pages[key] = {
-                "page_name":    name,
-                "page_url":     ad.get("page_url", ""),
-                "ad_count":     0,
-                "max_days":     0,
-                "total_spend_lo": 0,
-                "top_ad_body":  "",
+                "page_name":       name,
+                "page_url":        ad.get("page_url", ""),
+                "ad_count":        0,
+                "max_days":        0,
+                "total_spend_lo":  0,
+                "top_ad_body":     "",
                 "top_ad_headline": "",
+                "keywords":        set(),
             }
         pages[key]["ad_count"] += 1
+        pages[key]["keywords"].add(ad.get("keyword_matched", ""))
         days = ad.get("days_running", 0)
         if days > pages[key]["max_days"]:
             pages[key]["max_days"]        = days
-            pages[key]["top_ad_body"]     = ad.get("ad_body", "")[:300]
+            pages[key]["top_ad_body"]     = ad.get("ad_body", "")[:400]
             pages[key]["top_ad_headline"] = ad.get("ad_headline", "")[:150]
         pages[key]["total_spend_lo"] += ad.get("spend_lower", 0)
 
     ranked = sorted(pages.values(), key=lambda p: p["max_days"], reverse=True)
-    return ranked[:n]
+    # Convert set to list for JSON serialization
+    for p in ranked:
+        p["keywords"] = sorted(p["keywords"])
+    return ranked[:n] if n else ranked

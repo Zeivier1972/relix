@@ -199,6 +199,15 @@ class LeadDatabase:
             )
         """)
 
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS scan_log (
+                id {_PK},
+                scan_type TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                leads_found INTEGER DEFAULT 0
+            )
+        """)
+
         conn.commit()
         cur.close()
         conn.close()
@@ -1018,3 +1027,30 @@ class LeadDatabase:
         cur.close()
         conn.close()
         return {**ad_stats, **lead_stats}
+
+    def log_scan(self, scan_type: str, leads_found: int = 0) -> None:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        now = datetime.now().isoformat()
+        cur.execute(
+            f"INSERT INTO scan_log (scan_type, completed_at, leads_found) VALUES ({PH},{PH},{PH})",
+            (scan_type, now, leads_found),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def get_last_scan(self, scan_type: Optional[str] = None) -> Optional[str]:
+        conn = get_db_connection()
+        cur = _cursor(conn)
+        if scan_type:
+            cur.execute(
+                f"SELECT MAX(completed_at) AS t FROM scan_log WHERE scan_type={PH}",
+                (scan_type,),
+            )
+        else:
+            cur.execute("SELECT MAX(completed_at) AS t FROM scan_log")
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return (row["t"] if row else None) if row else None
