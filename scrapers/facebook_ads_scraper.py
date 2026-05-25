@@ -9,16 +9,16 @@ PRIMARY PATH  (requires FACEBOOK_ACCESS_TOKEN in .env)
     2. Add to .env: FACEBOOK_ACCESS_TOKEN=your_token
 
 FALLBACK PATH (no token)
-  Hits the public Ad Library search page via httpx and parses embedded JSON.
-  Returns fewer fields but requires zero credentials.
+  Launches a headless Chromium browser (Playwright) to load the Ad Library,
+  intercepts Facebook's internal GraphQL responses as they fire, and parses
+  the ad JSON directly. Passes the JS bot-detection challenge automatically.
+  No login, no credentials needed.
 
 BUYER LEAD DETECTION
-  Ad comments are NOT exposed by the Ad Library API and require Facebook login
-  to scrape at scale.  We detect buyer intent from:
-    - Ad engagement text visible in the snapshot pages (when public)
-    - Cross-referenced names/handles from search (best-effort, no login needed)
-  When an Instagram handle is found it is queued for auto-DM.
-  When only a Facebook name is found it is saved as a WARM lead.
+  Ad comments are not exposed by the Ad Library or its internal API.
+  Buyer intent is detected from ad snapshot pages (public HTML).
+  Instagram handles found in ad copy or comments are auto-queued for DM.
+  Facebook-only leads are saved as WARM for manual follow-up.
 """
 
 import asyncio
@@ -239,61 +239,190 @@ class FacebookAdsLibraryScraper:
             "source":          "facebook_ads_library",
         }
 
-    # ── Web fallback path ─────────────────────────────────────────────────────
+    # ── Playwright fallback path ──────────────────────────────────────────────
 
-    async def _web_search(self, keyword: str) -> List[Dict[str, Any]]:
+    async def _playwright_search(self, keyword: str) -> List[Dict[str, Any]]:
         """
-        Fallback: load the public Ad Library search page and parse any
-        embedded JSON from script tags. Returns partial ad data.
+        Headless Chromium renders the Ad Library page, passes the JS challenge,
+        then parses the rendered DOM text directly.
+
+        Page text structure (confirmed from live run):
+          Active
+          Library ID: 1379486973398374
+          Started running on Feb 3, 2026
+          Platforms ...
+          [N] ads use this creative
+          Open Dropdown
+          See summary details
+          [Advertiser Name]
+          Sponsored
+          [Ad copy text]
+          ...
         """
-        ads = []
+        from playwright.async_api import async_playwright
+
+        url = (
+            f"{_LIB_URL}?active_status=active&ad_type=all&country=US"
+            f"&q={keyword.replace(' ', '+')}&search_type=keyword_unordered&media_type=all"
+        )
+        page_text = ""
+
         try:
-            params = {
-                "active_status": "active",
-                "ad_type":       "all",
-                "country":       "US",
-                "q":             keyword,
-                "search_type":   "keyword_unordered",
-                "media_type":    "all",
-            }
-            resp = await self.client.get(_LIB_URL, params=params)
-            if resp.status_code != 200:
-                return ads
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage",
+                          "--disable-blink-features=AutomationControlled"],
+                )
+                ctx = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    locale="en-US",
+                    viewport={"width": 1280, "height": 900},
+                )
+                page = await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=35000)
+                # Wait for ad cards to render — poll for "Library ID:" text
+                for _ in range(12):
+                    await page.wait_for_timeout(1000)
+                    txt = await page.inner_text("body")
+                    if "Library ID:" in txt:
+                        page_text = txt
+                        break
+                else:
+                    page_text = await page.inner_text("body")
 
-            html = resp.text
-
-            # Facebook embeds initial data in several patterns
-            for pattern in [
-                r'"ads"\s*:\s*(\[.*?\])\s*,\s*"',
-                r'window\.__initialData\s*=\s*(\{.*?\})\s*;',
-                r'"adArchiveID"\s*:\s*"(\d+)"',
-            ]:
-                matches = re.findall(pattern, html, re.DOTALL)
-                for m in matches:
-                    try:
-                        parsed = json.loads(m if m.startswith('{') or m.startswith('[') else f'"{m}"')
-                        if isinstance(parsed, list):
-                            for item in parsed[:20]:
-                                if isinstance(item, dict) and item.get("adArchiveID"):
-                                    ads.append({
-                                        "ad_id":       str(item.get("adArchiveID", "")),
-                                        "page_name":   item.get("pageName", ""),
-                                        "ad_body":     str(item.get("snapshot", {}).get("body", {}).get("markup", ""))[:500],
-                                        "ad_headline": str(item.get("snapshot", {}).get("title", ""))[:200],
-                                        "start_date":  str(item.get("startDate", "")),
-                                        "days_running": _days_running(str(item.get("startDate", ""))),
-                                        "spend_lower": 0,
-                                        "spend_upper": 0,
-                                        "keyword_matched": keyword,
-                                        "source": "facebook_ads_web",
-                                    })
-                    except Exception:
-                        continue
+                await browser.close()
 
         except Exception as e:
-            print(f"[FBAds-Web] Error for '{keyword}': {e}")
+            print(f"[FBAds-Playwright] Error for '{keyword}': {e}")
+            return []
+
+        return self._parse_dom_text(page_text, keyword)
+
+    def _parse_dom_text(self, text: str, keyword: str) -> List[Dict[str, Any]]:
+        """
+        Parse the rendered Ad Library page text.
+        Splits on 'Library ID:' boundaries, then extracts each ad's fields.
+        """
+        ads = []
+        if not text or "Library ID:" not in text:
+            return ads
+
+        # Split into ad-block chunks
+        blocks = re.split(r"Library ID:\s*", text)
+        # Skip the header block (before first Library ID)
+        for block in blocks[1:]:
+            try:
+                ad = self._parse_ad_block(block, keyword)
+                if ad:
+                    ads.append(ad)
+            except Exception:
+                continue
 
         return ads
+
+    _MONTHS = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
+    def _parse_ad_block(self, block: str, keyword: str) -> Optional[Dict[str, Any]]:
+        """
+        block starts immediately after 'Library ID:' and contains one ad's worth of text.
+        """
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        if not lines:
+            return None
+
+        # First non-empty line after split is the ad_id
+        ad_id = lines[0].strip()
+        if not re.match(r"^\d{10,}", ad_id):
+            return None  # doesn't look like a Library ID number
+
+        # Find start date: "Started running on Month D, YYYY" or "Month D, YYYY"
+        start_date_raw = ""
+        days_running   = 0
+        date_re = re.compile(
+            r"Started running on\s+([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})"
+        )
+        for line in lines[:20]:
+            m = date_re.search(line)
+            if m:
+                month_str, day, year = m.group(1)[:3], int(m.group(2)), int(m.group(3))
+                month = self._MONTHS.get(month_str.capitalize(), 1)
+                try:
+                    start_dt   = datetime(year, month, day)
+                    days_running = max(0, (datetime.now() - start_dt).days)
+                    start_date_raw = start_dt.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+                break
+
+        # Find advertiser name: the line just before "Sponsored"
+        page_name = ""
+        for i, line in enumerate(lines):
+            if line == "Sponsored" and i > 0:
+                # The line before "Sponsored" is the advertiser name
+                page_name = lines[i - 1]
+                break
+
+        if not page_name:
+            # Fallback: look for non-noise lines before the date block
+            noise = {"Active", "Inactive", "Platforms", "Open Dropdown",
+                     "See summary details", "Remove", "Filters", "Sort"}
+            for line in lines[1:15]:
+                if (line and line not in noise and
+                        not line.startswith("Library ID") and
+                        not re.match(r"^\d+ ad", line) and
+                        "Started running" not in line and
+                        len(line) > 2):
+                    page_name = line
+                    break
+
+        # Ad copy: all text after "Sponsored" up to the next separator
+        ad_body = ""
+        sponsored_idx = None
+        for i, line in enumerate(lines):
+            if line == "Sponsored":
+                sponsored_idx = i
+                break
+        if sponsored_idx is not None:
+            # Collect lines after Sponsored, stop at noise markers
+            stop_words = {"See more", "Like", "Comment", "Share", "Active",
+                          "Library ID", "Started running", "Platforms", "Filters"}
+            body_parts = []
+            for line in lines[sponsored_idx + 1:sponsored_idx + 30]:
+                if any(sw in line for sw in stop_words) or re.match(r"Library ID:", line):
+                    break
+                body_parts.append(line)
+            ad_body = " ".join(body_parts)[:600]
+
+        # Ad snapshot URL
+        snapshot_url = f"https://www.facebook.com/ads/library/?id={ad_id}"
+
+        return {
+            "ad_id":             ad_id,
+            "page_name":         page_name,
+            "page_id":           "",
+            "ad_body":           ad_body,
+            "ad_headline":       "",
+            "ad_caption":        "",
+            "ad_description":    "",
+            "ad_snapshot_url":   snapshot_url,
+            "page_url":          "",
+            "start_date":        start_date_raw,
+            "days_running":      days_running,
+            "spend_lower":       0,
+            "spend_upper":       0,
+            "impressions_lower": 0,
+            "impressions_upper": 0,
+            "keyword_matched":   keyword,
+            "source":            "facebook_ads_playwright",
+        }
 
     # ── Comment / buyer lead extraction ──────────────────────────────────────
 
@@ -375,7 +504,7 @@ class FacebookAdsLibraryScraper:
                     if parsed:
                         kw_ads.append(parsed)
             else:
-                kw_ads = await self._web_search(keyword)
+                kw_ads = await self._playwright_search(keyword)
 
             # Deduplicate by ad_id
             new_ads = []
