@@ -34,6 +34,7 @@ from scrapers.public_records_scraper import PublicRecordsScraper
 from scrapers.sunbiz_scraper import SunbizScraper
 from scrapers.new_construction_scraper import NewConstructionScraper
 from scrapers.facebook_ads_scraper import FacebookAdsLibraryScraper, top_advertisers
+from scrapers.fb_ig_lead_scraper import extract_ig_handles, scrape_competitor_ig_comments
 
 PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("DB_PATH", "./leads.db")
@@ -483,7 +484,46 @@ async def run_fb_ads_job():
                 )
 
         print(f"[FBAds] Saved {saved_ads} ads | {saved_leads} buyer leads")
+
+        # ── Phase 2: scrape competitor Instagram accounts for buyer comments ──
+        # Extract IG handles from the top advertisers found above,
+        # then harvest buyer-intent comments from their recent posts.
+        ig_handles = extract_ig_handles(ads, top_n=30)
+        if ig_handles:
+            print(f"[FBAds] Starting IG comment scrape for {len(ig_handles)} competitor accounts...")
+            ig_leads = await scrape_competitor_ig_comments(ig_handles, max_accounts=20, max_posts_each=4)
+            ig_saved = 0
+            for lead in ig_leads:
+                lead_db_id = db.save_fb_ad_lead(lead)
+                if not lead_db_id:
+                    continue
+                ig_saved += 1
+                ig = lead.get("instagram_handle")
+                if ig and ig != lead.get("matched_account"):
+                    # Queue the COMMENTER (not the competitor) for DM
+                    new_id = db.add_lead(
+                        name=ig,
+                        source="instagram_comments",
+                        raw_data={
+                            "comment":   lead.get("comment_text", ""),
+                            "post_url":  lead.get("post_url", ""),
+                            "found_on":  lead.get("matched_account", ""),
+                        },
+                    )
+                    if new_id:
+                        db.add_to_dm_queue(
+                            lead_id=new_id,
+                            ig_username=ig,
+                            source="instagram_comments",
+                            score="HOT",
+                        )
+                        db.mark_fb_lead_dm_queued(lead_db_id, new_id)
+                        print(f"[FBAds-IG] Queued HOT buyer: @{ig}")
+            print(f"[FBAds-IG] {ig_saved} buyer leads from competitor IG comments")
+            saved_leads += ig_saved
+
         db.log_scan("fb_ads", saved_ads)
+        print(f"[FBAds] Complete — {saved_ads} ads | {saved_leads} total buyer leads")
     except Exception as e:
         print(f"[FBAds] Job error: {e}")
     finally:
