@@ -660,6 +660,48 @@ def schedule_jobs():
     scheduler.start()
 
 
+async def _restore_instagram_session():
+    """
+    Restore instagram_session.json from the INSTAGRAM_SESSION_B64 env var.
+    This survives Railway redeployments — the session file is wiped on each
+    redeploy but the env var persists.
+    Falls back to credential login if the env var isn't set but
+    INSTAGRAM_USERNAME + INSTAGRAM_PASSWORD are available.
+    """
+    import base64
+    from pathlib import Path
+    session_file = Path("./instagram_session.json")
+
+    # Option 1: restore from base64 env var (preferred — works across redeployments)
+    b64 = os.getenv("INSTAGRAM_SESSION_B64", "").strip()
+    if b64:
+        try:
+            session_json = base64.b64decode(b64).decode()
+            session_file.write_text(session_json)
+            print("[Startup] Instagram session restored from INSTAGRAM_SESSION_B64")
+            return
+        except Exception as e:
+            print(f"[Startup] Failed to decode INSTAGRAM_SESSION_B64: {e}")
+
+    # Option 2: auto-login with credentials (creates session fresh)
+    ig_user = os.getenv("INSTAGRAM_USERNAME", "").strip()
+    ig_pass = os.getenv("INSTAGRAM_PASSWORD", "").strip()
+    if ig_user and ig_pass and not session_file.exists():
+        print("[Startup] No Instagram session — attempting credential login...")
+        try:
+            from pipeline.phantom import PhantomDMBot
+            bot = PhantomDMBot()
+            await bot.setup()
+            success = await bot.login()
+            await bot.teardown()
+            if success:
+                print("[Startup] Instagram session created via credential login")
+            else:
+                print("[Startup] Instagram credential login failed — add INSTAGRAM_SESSION_B64 to Railway")
+        except Exception as e:
+            print(f"[Startup] Instagram auto-login error: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
     from database import USE_POSTGRES, DATABASE_URL
@@ -668,10 +710,13 @@ async def startup_event():
     print("RELIX Lead Generation System starting...")
     print(f"  Database backend : {backend}")
     if USE_POSTGRES:
-        # Mask credentials but show host for confirmation
         safe_url = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "connected"
         print(f"  Postgres host    : {safe_url}")
     print("=" * 60)
+
+    # Restore Instagram session before scheduler starts
+    await _restore_instagram_session()
+
     schedule_jobs()
     print("[+] Scheduler: Tier1=6h | Tier2=12h | Tier3=daily@6am")
     print("[+] Property: Listings=daily@7am | NewCon=daily@8am | PreForeclosure/Records/Sunbiz=Mon@6am")
