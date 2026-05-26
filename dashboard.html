@@ -736,10 +736,28 @@
     <button class="btn-scan" id="scan-btn" onclick="startScan()">Start Scan</button>
   </div>
 
+  <!-- ── System Health Panel ────────────────────────────────────── -->
+  <div id="health-panel" style="
+    background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:16px;
+    box-shadow:0 1px 3px rgba(0,0,0,.07);border:1px solid #e2e8f0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span style="font-size:.82rem;font-weight:700;color:#0f172a;text-transform:uppercase;letter-spacing:.06em;">System Health</span>
+      <button class="btn-refresh" onclick="loadHealth()" style="font-size:.72rem;padding:3px 10px;">↻</button>
+    </div>
+    <div id="health-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;">
+      <div class="empty" style="grid-column:1/-1;">Loading…</div>
+    </div>
+    <div id="health-env" style="margin-top:10px;font-size:.72rem;color:#64748b;"></div>
+    <div id="health-error" style="margin-top:8px;color:#ef4444;font-size:.75rem;display:none;"></div>
+  </div>
+
   <div class="feed-hdr">
     <h2>Lead Feed</h2>
     <button class="btn-refresh" onclick="load()">↻ Refresh</button>
   </div>
+
+  <div id="load-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;
+    border-radius:8px;padding:10px 14px;margin-bottom:12px;color:#dc2626;font-size:.82rem;"></div>
 
   <div class="feed" id="feed">
     <div class="empty">Loading…</div>
@@ -1073,23 +1091,34 @@ function copyDM(id, msg) {
 }
 
 async function load() {
+  const errEl = document.getElementById('load-error');
   try {
     const [d, s] = await Promise.all([fetch('/api/dashboard'), fetch('/status')]);
+    if (!d.ok) throw new Error(`Dashboard API error: ${d.status}`);
+    if (!s.ok) throw new Error(`Status API error: ${s.status}`);
     const dash   = await d.json();
     const status = await s.json();
+
+    errEl.style.display = 'none';
 
     document.getElementById('s-total').textContent = dash.stats.total ?? '—';
     document.getElementById('s-hot').textContent   = dash.stats.hot   ?? '—';
     document.getElementById('s-warm').textContent  = dash.stats.warm  ?? '—';
     document.getElementById('s-cold').textContent  = dash.stats.cold  ?? '—';
 
+    // job_status has shape: {tier1:{status,last_run}, tier2:..., tier3:...}
     const job     = status.job_status || {};
-    const running = job.status === 'running';
+    const tiers   = ['tier1', 'tier2', 'tier3'];
+    const running = tiers.some(t => job[t] && job[t].status === 'running');
+    const allLastRuns = tiers
+      .map(t => job[t] && job[t].last_run)
+      .filter(Boolean)
+      .sort();
+    const lastTs = allLastRuns.pop() || status.last_scan;
 
-    document.getElementById('dot').className       = 'dot' + (running ? ' running' : '');
+    document.getElementById('dot').className          = 'dot' + (running ? ' running' : '');
     document.getElementById('status-txt').textContent = running ? 'Scanning…' : 'Idle';
-    const lastTs = job.last_run || status.last_scan;
-    document.getElementById('last-run').textContent =
+    document.getElementById('last-run').textContent   =
       lastTs ? 'Last scan: ' + new Date(lastTs).toLocaleString() : 'Last scan: never';
 
     const btn = document.getElementById('scan-btn');
@@ -1104,7 +1133,11 @@ async function load() {
     renderLeads(dash.leads);
     document.getElementById('footer').textContent = 'Updated ' + new Date().toLocaleTimeString();
 
-  } catch(e) { console.error('load error', e); }
+  } catch(e) {
+    console.error('load error', e);
+    errEl.textContent = 'Could not load dashboard: ' + e.message + '. Is the server running?';
+    errEl.style.display = 'block';
+  }
 }
 
 async function startScan() {
@@ -1120,9 +1153,6 @@ async function startScan() {
     btn.innerHTML = 'Start Scan';
   }
 }
-
-load();
-setInterval(load, 30000);
 
 // ── Tab switching ──────────────────────────────────────────────────────────
 function switchTab(name) {
@@ -1196,11 +1226,16 @@ function renderRedditFeed(leads) {
 async function loadRedditLeads() {
   try {
     const res  = await fetch('/api/reddit-leads?limit=100');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     renderRedditFeed(data.leads || []);
     document.getElementById('reddit-footer').textContent =
       `${data.count} HOT Reddit leads · Updated ${new Date().toLocaleTimeString()}`;
-  } catch(e) { console.error('reddit-leads error', e); }
+  } catch(e) {
+    console.error('reddit-leads error', e);
+    const feed = document.getElementById('reddit-feed');
+    if (feed) feed.innerHTML = `<div class="empty" style="color:#dc2626;">Error loading Reddit leads: ${e.message}</div>`;
+  }
 }
 
 async function copyReply(leadId, btn) {
@@ -1614,7 +1649,11 @@ async function loadIntel() {
 
     document.getElementById('intel-footer').textContent =
       `${advs.length} advertisers · ${ads.length} ads · ${leads.length} buyer leads · Updated ${new Date().toLocaleTimeString()}`;
-  } catch(e) { console.error('intel error', e); }
+  } catch(e) {
+    console.error('intel error', e);
+    const el = document.getElementById('intel-advertisers');
+    if (el) el.innerHTML = `<div class="empty" style="color:#dc2626;">Error loading competitor intel: ${e.message}</div>`;
+  }
 }
 
 async function triggerFbAdsScan() {
@@ -1763,13 +1802,18 @@ function renderListingStats(stats) {
 async function loadListings() {
   try {
     const res  = await fetch('/api/property-leads?limit=300');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     _allListings = data.leads || [];
     renderListingStats(data.stats);
     filterListings(_listingFilter);
     document.getElementById('listings-footer').textContent =
       `${data.count} property leads · Updated ${new Date().toLocaleTimeString()}`;
-  } catch(e) { console.error('listings error', e); }
+  } catch(e) {
+    console.error('listings error', e);
+    const feed = document.getElementById('listings-feed');
+    if (feed) feed.innerHTML = `<div class="empty" style="color:#dc2626;">Error loading listings: ${e.message}</div>`;
+  }
 }
 
 async function pushToLofty(leadId, btn) {
@@ -1813,15 +1857,26 @@ async function sendListingSMS(leadId, btn) {
 }
 
 async function triggerListingScan() {
+  const btn = document.querySelector('[onclick="triggerListingScan()"]');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Starting…'; }
   try {
     await fetch('/scan/listings', { method: 'POST' });
-    alert('Listing scan triggered — check back in a few minutes.');
-  } catch(e) { console.error(e); }
+    if (btn) { btn.textContent = '⏳ Scanning…'; }
+    setTimeout(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 Scan Now'; }
+      loadListings();
+      loadHealth();
+    }, 10000);
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Scan Now'; }
+    console.error(e);
+  }
 }
 
 async function loadDMStatus() {
   try {
     const res  = await fetch('/api/dm-status');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
     document.getElementById('dm-sent').textContent    = data.stats.sent    ?? '—';
@@ -1833,8 +1888,120 @@ async function loadDMStatus() {
     renderAutoDMBar(data.auto_dm);
     renderDMFeed(data.leads);
     document.getElementById('dm-footer').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  } catch(e) { console.error('dm-status error', e); }
+  } catch(e) {
+    console.error('dm-status error', e);
+    const el = document.getElementById('dm-feed');
+    if (el) el.innerHTML = `<div class="empty" style="color:#dc2626;">Error loading DM status: ${e.message}</div>`;
+  }
 }
+
+// ── System Health ────────────────────────────────────────────────────────────
+
+const SCRAPER_LABELS = {
+  tier1:            'Social Scan (6h)',
+  tier2:            'City Scan (12h)',
+  tier3:            'Broad Scan (daily)',
+  fb_ads:           'FB Ads Library',
+  listings:         'Zillow/Realtor/Redfin',
+  preforeclosure:   'Pre-Foreclosure',
+  public_records:   'Public Records',
+  sunbiz:           'Sunbiz LLC',
+  new_construction: 'New Construction',
+};
+
+const SCAN_ENDPOINTS = {
+  tier1:            '/scan/now',
+  tier2:            '/scan/tier2',
+  tier3:            '/scan/tier3',
+  fb_ads:           '/scan/fb-ads',
+  listings:         '/scan/listings',
+  preforeclosure:   '/scan/preforeclosure',
+  public_records:   '/scan/public-records',
+  sunbiz:           '/scan/sunbiz',
+  new_construction: '/scan/new-construction',
+};
+
+async function triggerScraper(type) {
+  const endpoint = SCAN_ENDPOINTS[type];
+  if (!endpoint) return;
+  const btn = document.getElementById(`health-btn-${type}`);
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const res = await fetch(endpoint, { method: 'POST' });
+    const data = await res.json();
+    if (btn) { btn.textContent = '✓'; setTimeout(() => { btn.disabled = false; btn.textContent = '▶'; }, 3000); }
+    setTimeout(loadHealth, 5000);
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.textContent = '!'; }
+    console.error('trigger error', e);
+  }
+}
+
+async function loadHealth() {
+  const grid    = document.getElementById('health-grid');
+  const envEl   = document.getElementById('health-env');
+  const errEl   = document.getElementById('health-error');
+  try {
+    const res  = await fetch('/api/health');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const h = await res.json();
+
+    errEl.style.display = 'none';
+
+    // Build scraper cards
+    const scrapers = ['tier1','tier2','tier3','fb_ads','listings',
+                      'preforeclosure','public_records','sunbiz','new_construction'];
+    grid.innerHTML = scrapers.map(key => {
+      const ts  = h.last_runs && h.last_runs[key];
+      const lbl = SCRAPER_LABELS[key] || key;
+      const tier = h.tier_status && h.tier_status[key];
+      const running = tier && tier.status === 'running';
+      const statusColor = running ? '#0ABAB5' : (ts ? '#22c55e' : '#f97316');
+      const statusText  = running ? 'Running…' : (ts ? 'OK' : 'Never run');
+      const timeText    = ts ? ago(ts) : '—';
+      return `
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:9px 10px;position:relative;">
+          <div style="font-size:.7rem;font-weight:700;color:#0f172a;margin-bottom:4px;">${esc(lbl)}</div>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${statusColor};display:inline-block;flex-shrink:0;"></span>
+            <span style="font-size:.7rem;color:${statusColor};font-weight:600;">${statusText}</span>
+          </div>
+          <div style="font-size:.67rem;color:#64748b;margin-top:3px;">Last: ${timeText}</div>
+          <button id="health-btn-${key}" onclick="triggerScraper('${key}')"
+            style="position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:5px;
+                   border:1px solid #cbd5e1;background:#fff;font-size:.8rem;cursor:pointer;
+                   display:flex;align-items:center;justify-content:center;padding:0;"
+            title="Run ${esc(lbl)} now">▶</button>
+        </div>`;
+    }).join('');
+
+    // IG session indicator
+    const igOk = h.instagram_session_on_disk;
+    const igColor = igOk ? '#22c55e' : '#ef4444';
+    const igText  = igOk ? 'IG session: active' : 'IG session: MISSING (add INSTAGRAM_SESSION_B64 to Railway)';
+
+    // Env var dots
+    const envVars = h.env_vars || {};
+    const envBits = Object.entries(envVars).map(([k, v]) =>
+      `<span style="margin-right:8px;"><span style="color:${v?'#22c55e':'#ef4444'};">●</span> ${k}</span>`
+    ).join('');
+
+    envEl.innerHTML = `
+      <div style="margin-bottom:5px;font-weight:600;color:${igColor};">${igText}</div>
+      <div>${envBits}</div>`;
+
+  } catch(e) {
+    console.error('health error', e);
+    errEl.textContent = 'Health check failed: ' + e.message;
+    errEl.style.display = 'block';
+    grid.innerHTML = '<div class="empty" style="color:#dc2626;grid-column:1/-1;">Could not reach server</div>';
+  }
+}
+
+load();
+loadHealth();
+setInterval(load, 30000);
+setInterval(loadHealth, 60000);
 </script>
 </body>
 </html>

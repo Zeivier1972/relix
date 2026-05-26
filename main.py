@@ -544,6 +544,7 @@ async def dm_queue_processor_job():
 async def run_listing_scrapers():
     """Daily 7am — Zillow, Realtor.com, Redfin."""
     print(f"\n[{datetime.now()}] Running listing scrapers (Zillow/Realtor/Redfin)...")
+    total_saved = 0
     for ScraperClass, tag in [
         (ZillowScraper, "Zillow"),
         (RealtorScraper, "Realtor"),
@@ -553,11 +554,13 @@ async def run_listing_scrapers():
         try:
             leads = await s.scrape_all()
             saved = await _save_and_process_property_leads(leads, tag)
+            total_saved += saved
             print(f"[{tag}] Saved {saved}/{len(leads)} new property leads")
         except Exception as e:
             print(f"[{tag}] Job error: {e}")
         finally:
             await s.close()
+    db.log_scan("listings", total_saved)
 
 
 async def run_preforeclosure_job():
@@ -567,6 +570,7 @@ async def run_preforeclosure_job():
     try:
         leads = await s.scrape_all()
         saved = await _save_and_process_property_leads(leads, "PreForeclosure")
+        db.log_scan("preforeclosure", saved)
         print(f"[PreForeclosure] Saved {saved}/{len(leads)} leads")
     except Exception as e:
         print(f"[PreForeclosure] Job error: {e}")
@@ -581,6 +585,7 @@ async def run_public_records_job():
     try:
         leads = await s.scrape_all()
         saved = await _save_and_process_property_leads(leads, "PublicRecords")
+        db.log_scan("public_records", saved)
         print(f"[PublicRecords] Saved {saved}/{len(leads)} leads")
     except Exception as e:
         print(f"[PublicRecords] Job error: {e}")
@@ -595,6 +600,7 @@ async def run_sunbiz_job():
     try:
         leads = await s.scrape_all()
         saved = await _save_and_process_property_leads(leads, "Sunbiz")
+        db.log_scan("sunbiz", saved)
         print(f"[Sunbiz] Saved {saved}/{len(leads)} leads")
     except Exception as e:
         print(f"[Sunbiz] Job error: {e}")
@@ -609,6 +615,7 @@ async def run_new_construction_job():
     try:
         leads = await s.scrape_all()
         saved = await _save_and_process_property_leads(leads, "NewConstruction")
+        db.log_scan("new_construction", saved)
         print(f"[NewConstruction] Saved {saved}/{len(leads)} leads")
     except Exception as e:
         print(f"[NewConstruction] Job error: {e}")
@@ -1044,6 +1051,78 @@ async def scan_preforeclosure(background_tasks: BackgroundTasks):
 async def scan_fb_ads(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_fb_ads_job)
     return {"status": "Facebook Ads Library scan triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/scan/public-records")
+async def scan_public_records(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_public_records_job)
+    return {"status": "Public records scraper triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/scan/sunbiz")
+async def scan_sunbiz(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_sunbiz_job)
+    return {"status": "Sunbiz scraper triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/scan/new-construction")
+async def scan_new_construction(background_tasks: BackgroundTasks):
+    background_tasks.add_task(run_new_construction_job)
+    return {"status": "New construction scraper triggered", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/health")
+async def api_health():
+    """System health check — shows status of all scrapers, session state, env vars."""
+    from pathlib import Path
+    import base64 as _b64
+
+    ig_session_file = Path("./instagram_session.json")
+    ig_session_present = ig_session_file.exists() and ig_session_file.stat().st_size > 100
+
+    env_vars = {
+        "DATABASE_URL":           bool(os.getenv("DATABASE_URL")),
+        "INSTAGRAM_SESSION_B64":  bool(os.getenv("INSTAGRAM_SESSION_B64")),
+        "INSTAGRAM_USERNAME":     bool(os.getenv("INSTAGRAM_USERNAME")),
+        "INSTAGRAM_PASSWORD":     bool(os.getenv("INSTAGRAM_PASSWORD")),
+        "CLAUDE_API_KEY":         bool(os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")),
+        "TWILIO_ACCOUNT_SID":     bool(os.getenv("TWILIO_ACCOUNT_SID")),
+        "LOFTY_API_KEY":          bool(os.getenv("LOFTY_API_KEY")),
+    }
+
+    # Pull last-run times from DB for all scan types
+    scan_types = ["tier1", "tier2", "tier3", "fb_ads",
+                  "listings", "preforeclosure", "public_records",
+                  "sunbiz", "new_construction"]
+    last_runs = {st: db.get_last_scan(st) for st in scan_types}
+
+    # In-memory job status for currently-running tiers
+    tier_status = {
+        "tier1": job_status.get("tier1", {}),
+        "tier2": job_status.get("tier2", {}),
+        "tier3": job_status.get("tier3", {}),
+    }
+
+    # Check if Playwright Chromium is installed
+    chromium_ok = False
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["python", "-m", "playwright", "install", "--help"],
+            capture_output=True, timeout=5
+        )
+        chromium_ok = True
+    except Exception:
+        pass
+
+    return {
+        "instagram_session_on_disk": ig_session_present,
+        "env_vars":                  env_vars,
+        "last_runs":                 last_runs,
+        "tier_status":               tier_status,
+        "chromium_available":        chromium_ok,
+        "timestamp":                 datetime.now().isoformat(),
+    }
 
 
 @app.get("/api/fb-ads")
