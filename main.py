@@ -841,6 +841,36 @@ async def api_dm_status():
     }
 
 
+@app.post("/api/dm-queue/add")
+async def add_to_dm_queue_manual(body: dict):
+    """
+    Manually add an Instagram handle to the DM queue.
+    Body: {"ig_username": "handle", "name": "optional name", "note": "optional context"}
+    """
+    ig = (body.get("ig_username") or "").strip().lstrip("@")
+    if not ig:
+        return {"status": "error", "reason": "ig_username is required"}
+
+    name = body.get("name") or ig
+    note = body.get("note") or "Manual entry"
+
+    lead_id = db.add_lead(
+        name=name,
+        source="manual",
+        raw_data={"note": note, "ig_username": ig},
+    )
+    if not lead_id:
+        return {"status": "error", "reason": "Lead already exists or DB error"}
+
+    db.add_to_dm_queue(
+        lead_id=lead_id,
+        ig_username=ig,
+        source="manual",
+        score="WARM",
+    )
+    return {"status": "queued", "ig_username": ig, "lead_id": lead_id}
+
+
 @app.post("/api/auto-dm/toggle")
 async def toggle_auto_dm():
     global auto_dm_enabled
@@ -1123,6 +1153,82 @@ async def api_health():
         "chromium_available":        chromium_ok,
         "timestamp":                 datetime.now().isoformat(),
     }
+
+
+@app.get("/api/test-scrapers")
+async def test_scrapers():
+    """
+    Quick diagnostic — tests each listing scraper on ONE ZIP (33131 = Brickell)
+    and returns what it gets back or what error occurred.
+    Useful for debugging Railway IP blocks and API issues.
+    """
+    from pathlib import Path
+    test_zip = "33131"
+    results = {}
+
+    # ── Redfin ────────────────────────────────────────────────────────────────
+    try:
+        s = RedfinScraper()
+        leads = await s.scrape_zip(test_zip)
+        await s.close()
+        results["redfin"] = {"status": "ok", "leads_found": len(leads),
+                              "sample": leads[0] if leads else None}
+    except Exception as e:
+        results["redfin"] = {"status": "error", "error": str(e)}
+
+    # ── Zillow ─────────────────────────────────────────────────────────────────
+    try:
+        s = ZillowScraper()
+        import httpx as _httpx
+        try:
+            body = {
+                "searchQueryState": {
+                    "pagination": {"currentPage": 1},
+                    "isMapVisible": False,
+                    "mapBounds": {},
+                    "regionSelection": [{"regionId": test_zip, "regionType": 7}],
+                    "filterState": {"isForSaleByOwner": {"value": True}},
+                    "isListVisible": True,
+                },
+                "wants": {"cat1": ["listResults"]},
+                "requestId": 1,
+                "isDebugRequest": False,
+            }
+            resp = await s.client.post(
+                "https://www.zillow.com/async-create-search-page-state",
+                json=body, headers={"Content-Type": "application/json"}
+            )
+            results["zillow"] = {
+                "status": "ok" if resp.status_code == 200 else "blocked",
+                "http_status": resp.status_code,
+                "leads_found": len(resp.json().get("cat1", {}).get("searchResults", {}).get("listResults", []))
+                    if resp.status_code == 200 else 0,
+            }
+        except _httpx.HTTPStatusError as e:
+            results["zillow"] = {"status": "blocked", "http_status": e.response.status_code}
+        await s.close()
+    except Exception as e:
+        results["zillow"] = {"status": "error", "error": str(e)}
+
+    # ── Realtor ────────────────────────────────────────────────────────────────
+    try:
+        s = RealtorScraper()
+        leads = await s.scrape_zip(test_zip)
+        await s.close()
+        results["realtor"] = {"status": "ok", "leads_found": len(leads),
+                               "sample": leads[0] if leads else None}
+    except Exception as e:
+        results["realtor"] = {"status": "error", "error": str(e)}
+
+    # ── Instagram session ──────────────────────────────────────────────────────
+    from pathlib import Path
+    ig_file = Path("./instagram_session.json")
+    results["instagram_session"] = {
+        "on_disk": ig_file.exists() and ig_file.stat().st_size > 100 if ig_file.exists() else False,
+        "env_var_set": bool(os.getenv("INSTAGRAM_SESSION_B64")),
+    }
+
+    return {"test_zip": test_zip, "timestamp": datetime.now().isoformat(), "results": results}
 
 
 @app.get("/api/fb-ads")

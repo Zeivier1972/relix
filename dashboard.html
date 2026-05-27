@@ -814,6 +814,29 @@
     </div>
   </div>
 
+  <!-- Manual add to DM queue -->
+  <div style="background:#f0fdf9;border:1px solid #0ABAB5;border-radius:10px;padding:14px 16px;margin-bottom:14px;">
+    <div style="font-size:.82rem;font-weight:700;color:#0f172a;margin-bottom:10px;">Add Instagram Handle to DM Queue</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;">
+        <label style="font-size:.7rem;color:#64748b;font-weight:600;">@username</label>
+        <input id="manual-dm-handle" type="text" placeholder="e.g. maria_compra_miami"
+          style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.82rem;width:100%;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:140px;">
+        <label style="font-size:.7rem;color:#64748b;font-weight:600;">Name (optional)</label>
+        <input id="manual-dm-name" type="text" placeholder="e.g. Maria Garcia"
+          style="padding:8px 10px;border:1px solid #cbd5e1;border-radius:7px;font-size:.82rem;width:100%;">
+      </div>
+      <button onclick="addManualDM()"
+        style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;
+               font-size:.82rem;font-weight:700;background:#0ABAB5;color:#fff;white-space:nowrap;">
+        + Add to Queue
+      </button>
+    </div>
+    <div id="manual-dm-msg" style="margin-top:6px;font-size:.76rem;display:none;"></div>
+  </div>
+
   <!-- Send All button -->
   <div class="ctrl" style="margin-bottom:16px;">
     <div class="ctrl-left">
@@ -1870,6 +1893,43 @@ async function triggerListingScan() {
   } catch(e) {
     if (btn) { btn.disabled = false; btn.textContent = '🔄 Scan Now'; }
     console.error(e);
+  }
+}
+
+async function addManualDM() {
+  const handleEl = document.getElementById('manual-dm-handle');
+  const nameEl   = document.getElementById('manual-dm-name');
+  const msgEl    = document.getElementById('manual-dm-msg');
+  const handle   = (handleEl.value || '').trim().replace(/^@/, '');
+  if (!handle) {
+    msgEl.style.display = 'block';
+    msgEl.style.color   = '#dc2626';
+    msgEl.textContent   = 'Please enter an Instagram username.';
+    return;
+  }
+  msgEl.style.display = 'block';
+  msgEl.style.color   = '#64748b';
+  msgEl.textContent   = 'Adding…';
+  try {
+    const res  = await fetch('/api/dm-queue/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ig_username: handle, name: nameEl.value.trim() || handle }),
+    });
+    const data = await res.json();
+    if (data.status === 'queued') {
+      msgEl.style.color = '#16a34a';
+      msgEl.textContent = `@${handle} added to DM queue!`;
+      handleEl.value = '';
+      nameEl.value   = '';
+      setTimeout(loadDMStatus, 800);
+    } else {
+      msgEl.style.color = '#dc2626';
+      msgEl.textContent = 'Error: ' + (data.reason || 'unknown');
+    }
+  } catch(e) {
+    msgEl.style.color = '#dc2626';
+    msgEl.textContent = 'Request failed: ' + e.message;
   }
 }
 
